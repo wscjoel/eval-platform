@@ -29,6 +29,8 @@ uvicorn app.main:app --reload --port 8000
 
 ### 2. 前端
 
+开发模式（热更新，前后端分离端口）：
+
 ```bash
 cd frontend
 npm install --legacy-peer-deps   # 仅首次
@@ -36,6 +38,30 @@ npm run dev                      # 打开 http://localhost:5173
 ```
 
 Vite 已配置 `/api` 代理到 `http://localhost:8000`，无需手动配置 CORS。
+
+### 3. 生产部署（单服务）
+
+为避免线上白屏（浏览器无法解析 TSX 源码），生产环境必须先把前端构建产物落到 `backend/app/static/`，由 FastAPI 同时托管前端与 API。
+
+```bash
+# 1) 构建前端，产物直接输出到 backend/app/static/
+cd frontend
+npm ci --legacy-peer-deps
+npm run build
+
+# 2) 启动后端（同时提供 /api 与 SPA 页面）
+cd ../backend
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+构建后访问 `http://<host>:8000/` 即可看到页面：
+
+- `/`、`/tasks/:id` 等 SPA 路由均回退到 `index.html`
+- `/assets/*` 由 FastAPI 以正确 MIME 类型分发
+- `/api/*` 路径下保留所有后端接口
+
+> 部署到平台时务必把仓库根目录中的 `backend/app/static/` 产物提交入库（或在 CI/CD 中执行上述 `npm run build`），否则平台仅托管源码会再次白屏。
 
 ## API Key 两种方式
 
