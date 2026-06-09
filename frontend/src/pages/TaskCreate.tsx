@@ -1,8 +1,17 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, apiKeyStore, DatasetDetail, PromptTemplate, TaskOut } from "../api/client";
-import { IconCheck, IconDoc, IconUpload } from "../components/Icon";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  api,
+  apiKeyStore,
+  DatasetDetail,
+  DatasetOut,
+  datasetsApi,
+  PromptTemplate,
+  TaskOut,
+} from "../api/client";
+import { DatasetPreviewModal } from "../components/DatasetPreviewModal";
+import { IconCheck, IconDoc, IconRefresh } from "../components/Icon";
 import { PromptEditor } from "../components/PromptEditor";
 import { getUsedColumns } from "../components/PromptPreview";
 import { StatusBadge } from "../components/StatusBadge";
@@ -36,12 +45,13 @@ export function TaskCreate() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">新建评测</h1>
-        <p className="text-sm text-ink-500 mt-1">三步完成：上传数据 → 配置提示词 → 启动评测</p>
+        <p className="text-sm text-ink-500 mt-1">三步完成：选择数据集 → 配置提示词 → 启动评测</p>
       </div>
       <Steps step={step} />
 
       {step === 1 && (
-        <StepUpload
+        <StepPickDataset
+          selectedId={ds?.id ?? null}
           onNext={(d) => {
             setDs(d);
             if (!taskName) setTaskName(d.name.replace(/\.[^.]+$/, ""));
@@ -84,7 +94,7 @@ export function TaskCreate() {
 
 function Steps({ step }: { step: Step }) {
   const items = [
-    { k: 1, label: "上传数据" },
+    { k: 1, label: "选择数据集" },
     { k: 2, label: "配置评测" },
     { k: 3, label: "启动" },
   ];
@@ -111,59 +121,142 @@ function Steps({ step }: { step: Step }) {
   );
 }
 
-function StepUpload({ onNext }: { onNext: (d: DatasetDetail) => void }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [drag, setDrag] = useState(false);
-  const upload = useMutation({
-    mutationFn: async (file: File) => {
-      const fd = new FormData();
-      fd.append("file", file);
-      const r = await api.post<DatasetDetail>("/datasets", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      return r.data;
-    },
+function fmtTime(s: string) {
+  const d = new Date(s + "Z");
+  return d.toLocaleString();
+}
+
+function StepPickDataset({
+  selectedId,
+  onNext,
+}: {
+  selectedId: number | null;
+  onNext: (d: DatasetDetail) => void;
+}) {
+  const [picked, setPicked] = useState<number | null>(selectedId);
+  const [previewId, setPreviewId] = useState<number | null>(null);
+  const listQ = useQuery({ queryKey: ["datasets"], queryFn: datasetsApi.list });
+
+  const detailMut = useMutation({
+    mutationFn: async (id: number) => datasetsApi.get(id),
     onSuccess: onNext,
   });
 
-  const onPick = (f?: File | null) => {
-    if (!f) return;
-    upload.mutate(f);
-  };
+  const datasets: DatasetOut[] = listQ.data || [];
 
   return (
-    <div className="card p-8">
-      <label
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDrag(false);
-          onPick(e.dataTransfer.files?.[0]);
-        }}
-        className={`flex flex-col items-center justify-center gap-3 py-14 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-          drag ? "border-accent bg-amber-50/40" : "border-ink-200 hover:border-ink-700 hover:bg-ink-50"
-        }`}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          accept=".xlsx,.xls,.csv"
-          onChange={(e) => onPick(e.target.files?.[0])}
-        />
-        <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-ink-100 text-ink-700">
-          <IconUpload className="w-5 h-5" />
-        </span>
-        <div className="text-ink-900 font-medium">点击或拖拽上传 .xlsx / .xls / .csv</div>
-        <div className="text-xs text-ink-500">最大 5MB / 500 行</div>
-        {upload.isPending && <div className="text-xs text-ink-700 mt-2">解析中…</div>}
-        {upload.isError && (
-          <div className="text-xs text-danger mt-2">
-            上传失败：{(upload.error as any)?.response?.data?.detail || String(upload.error)}
+    <div className="space-y-4">
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <div className="text-sm font-semibold text-ink-900">选择要评测的数据集</div>
+            <div className="text-xs text-ink-500 mt-0.5">
+              从已保存的评测数据集中选择一个。若列表为空，请先到
+              <Link to="/datasets" className="text-accent hover:underline mx-1">
+                数据集管理
+              </Link>
+              新建数据集。
+            </div>
+          </div>
+          <Link to="/datasets" className="btn-ghost border border-ink-200 !py-1 !text-xs">
+            前往数据集管理
+          </Link>
+        </div>
+
+        {listQ.isLoading && (
+          <div className="px-3 py-10 text-center text-sm text-ink-500">加载中…</div>
+        )}
+        {!listQ.isLoading && datasets.length === 0 && (
+          <div className="px-3 py-10 text-center text-sm text-ink-500">
+            暂无数据集。请到「数据集管理」上传一个数据集后再来新建评测。
           </div>
         )}
-      </label>
+
+        {datasets.length > 0 && (
+          <div className="border border-ink-200 rounded overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50 text-ink-700 text-left">
+                <tr>
+                  <th className="px-3 py-2 font-medium w-10"></th>
+                  <th className="px-3 py-2 font-medium">名称</th>
+                  <th className="px-3 py-2 font-medium">行数</th>
+                  <th className="px-3 py-2 font-medium">列数</th>
+                  <th className="px-3 py-2 font-medium">创建时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {datasets.map((d) => {
+                  const active = picked === d.id;
+                  return (
+                    <tr
+                      key={d.id}
+                      onClick={() => setPicked(d.id)}
+                      className={`border-t border-ink-200 cursor-pointer transition-colors ${
+                        active ? "bg-amber-50/60" : "hover:bg-ink-50/60"
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="radio"
+                          name="pick-dataset"
+                          checked={active}
+                          onChange={() => setPicked(d.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          className="text-ink-900 font-medium truncate hover:text-accent transition-colors cursor-pointer text-left"
+                          title="点击预览数据集"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewId(d.id);
+                          }}
+                        >
+                          {d.name}
+                        </button>
+                        <div className="text-[11px] text-ink-500 mt-0.5 truncate">
+                          {d.columns.slice(0, 6).join(" · ")}
+                          {d.columns.length > 6 ? ` … +${d.columns.length - 6}` : ""}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-ink-700">{d.rows}</td>
+                      <td className="px-3 py-2 tabular-nums text-ink-700">{d.columns.length}</td>
+                      <td className="px-3 py-2 text-ink-500">{fmtTime(d.created_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {detailMut.isError && (
+          <div className="text-xs text-danger mt-3">
+            加载数据集失败：
+            {(detailMut.error as any)?.response?.data?.detail || String(detailMut.error)}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end pt-4">
+          <button
+            className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={picked == null || detailMut.isPending}
+            onClick={() => {
+              if (picked != null) detailMut.mutate(picked);
+            }}
+          >
+            {detailMut.isPending ? (
+              <IconRefresh className="w-4 h-4 animate-spin" />
+            ) : null}
+            下一步 →
+          </button>
+        </div>
+      </div>
+
+      {previewId != null && (
+        <DatasetPreviewModal datasetId={previewId} onClose={() => setPreviewId(null)} />
+      )}
     </div>
   );
 }

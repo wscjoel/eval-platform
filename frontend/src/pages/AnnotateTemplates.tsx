@@ -30,7 +30,12 @@ export function AnnotateTemplates() {
             <span>/</span>
             <span>模版管理</span>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight mt-1">模版管理</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <Link to="/annotate" className="btn-ghost !px-1.5 !py-1 text-ink-500" title="返回人工批注">
+              <IconArrowLeft className="w-4 h-4" />
+            </Link>
+            <h1 className="text-2xl font-semibold tracking-tight">模版管理</h1>
+          </div>
           <p className="text-sm text-ink-500 mt-1">定义【数据列】（客观信息）与【批注列】（待标注维度）</p>
         </div>
         <button className="btn-accent" onClick={() => setCreating(true)}>

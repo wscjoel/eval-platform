@@ -1,4 +1,4 @@
-# LLM Eval Platform — Backend
+# 客服AI评测台 — Backend
 
 ## 快速开始
 
@@ -20,4 +20,5 @@ uvicorn app.main:app --reload --port 8000
 | `LLM_GW_API_KEY` | 京东 LLM 网关密钥（前端 UI 可覆盖） | 无 |
 | `LLM_GW_URL` | 网关地址（OpenAI Chat Completions 协议） | `http://llm-gw.jd.local/v1/chat/completions` |
 | `EVAL_CONCURRENCY` | 单任务并发数 | 3 |
-| `EVAL_MAX_ROWS` | 单文件最大行数 | 500 |
+| `EVAL_MAX_ROWS` | 单文件最大行数 | 10000 |
+| `EVAL_MAX_FILE_MB` | 单文件最大体积 (MB) | 50 |

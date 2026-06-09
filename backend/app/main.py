@@ -15,7 +15,7 @@ from .api import tasks as tasks_api
 from .config import LLM_GW_API_KEY_ENV
 from .db import init_db
 
-app = FastAPI(title="LLM Eval Platform", version="0.1.0")
+app = FastAPI(title="客服AI评测台", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

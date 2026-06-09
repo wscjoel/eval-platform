@@ -21,20 +21,13 @@ for d in (DATA_DIR, UPLOAD_DIR, EXPORT_DIR):
 LLM_GW_URL = os.getenv("LLM_GW_URL", "http://llm-gw.jd.local/v1/chat/completions")
 LLM_GW_API_KEY_ENV = "LLM_GW_API_KEY"
 
-EVAL_CONCURRENCY = int(os.getenv("EVAL_CONCURRENCY", "3"))
-EVAL_MAX_ROWS = int(os.getenv("EVAL_MAX_ROWS", "500"))
-EVAL_MAX_FILE_MB = 5
+EVAL_CONCURRENCY = int(os.getenv("EVAL_CONCURRENCY", "1"))
+LLM_MIN_INTERVAL_S = float(os.getenv("LLM_MIN_INTERVAL_S", "1.0"))
+EVAL_MAX_ROWS = int(os.getenv("EVAL_MAX_ROWS", "10000"))
+EVAL_MAX_FILE_MB = int(os.getenv("EVAL_MAX_FILE_MB", "50"))
 
 MODEL_LIST = [
     "GPT-5.5-joybuilder",
-    "Gemini-3.1-Flash-Lite-joybuilder",
-    "Gemini-2.5-Pro-joybuilder",
-    "Gemini-2.5-Flash-joybuilder",
-    "Claude-Opus-4.7-joybuilder",
-    "Claude-Sonnet-4.5-joybuilder",
-    "Claude-Haiku-3.5-joybuilder",
-    "GPT-5-joybuilder",
-    "GPT-4.1-joybuilder",
 ]
 DEFAULT_MODEL = MODEL_LIST[0]
 

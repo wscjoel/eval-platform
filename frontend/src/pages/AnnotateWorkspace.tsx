@@ -112,7 +112,12 @@ export function AnnotateWorkspace() {
             <span>/</span>
             <span>{job.name}</span>
           </div>
-          <h1 className="text-xl font-semibold tracking-tight mt-1">{job.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <Link to="/annotate" className="btn-ghost !px-1.5 !py-1 text-ink-500" title="返回人工批注">
+              <IconArrowLeft className="w-4 h-4" />
+            </Link>
+            <h1 className="text-xl font-semibold tracking-tight">{job.name}</h1>
+          </div>
           <div className="text-xs text-ink-500 mt-0.5">
             来源：{job.source_filename} · 共 {job.total_rows} 行 · 已批注 <span className="text-success font-medium">{job.annotated_rows}</span> · 未批注 <span className="text-warning font-medium">{job.pending_rows}</span>
           </div>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from ..models import (
     AnnotationDimensionConfig,
     AnnotationJob,
     AnnotationTemplate,
+    Dataset,
 )
 from ..schemas import (
     AnnotationTemplateCreate,
@@ -30,6 +32,7 @@ from ..schemas import (
     DimensionConfigUpdate,
     JobCreate,
     JobDetail,
+    JobFromDatasetRequest,
     JobOut,
     RowDetail,
     RowSummary,
@@ -226,6 +229,26 @@ def _save_upload(file: UploadFile) -> tuple[Path, int]:
     return dest, size
 
 
+def _build_parse_response(
+    df: pd.DataFrame,
+    tpl: AnnotationTemplate,
+    source_path: str,
+    source_filename: str,
+) -> UploadParseResponse:
+    columns = list(df.columns)
+    template_fields = list((tpl.data_columns or [])) + list((tpl.annotation_columns or []))
+    suggested = {field: field for field in template_fields if field in columns}
+    empty_cols = [c for c in columns if (df[c].astype(str).str.strip() == "").all()]
+    return UploadParseResponse(
+        source_path=source_path,
+        source_filename=source_filename,
+        columns=columns,
+        total_rows=len(df),
+        suggested_mapping=suggested,
+        empty_columns=empty_cols,
+    )
+
+
 @router.post("/jobs/upload", response_model=UploadParseResponse)
 def upload_and_parse(
     template_id: int = Form(...),
@@ -245,23 +268,39 @@ def upload_and_parse(
         dest.unlink(missing_ok=True)
         raise HTTPException(400, f"too many rows: {len(df)} > {EVAL_MAX_ROWS}")
 
-    columns = list(df.columns)
-    template_fields = list((tpl.data_columns or [])) + list((tpl.annotation_columns or []))
-    suggested = {
-        field: field
-        for field in template_fields
-        if field in columns
-    }
-    empty_cols = [c for c in columns if (df[c].astype(str).str.strip() == "").all()]
+    return _build_parse_response(df, tpl, dest.name, file.filename or dest.name)
 
-    return UploadParseResponse(
-        source_path=dest.name,
-        source_filename=file.filename or dest.name,
-        columns=columns,
-        total_rows=len(df),
-        suggested_mapping=suggested,
-        empty_columns=empty_cols,
-    )
+
+@router.post("/jobs/from-dataset", response_model=UploadParseResponse)
+def from_dataset(payload: JobFromDatasetRequest, db: Session = Depends(get_session)):
+    """从已有评测数据集创建批注源：复制数据集文件后预解析。
+
+    复制（而非直接引用）数据集文件，避免删除批注任务时误删原数据集文件。
+    """
+    tpl = db.get(AnnotationTemplate, payload.template_id)
+    if tpl is None:
+        raise HTTPException(404, "template not found")
+    ds = db.get(Dataset, payload.dataset_id)
+    if ds is None:
+        raise HTTPException(404, "dataset not found")
+    src = UPLOAD_DIR / ds.filename
+    if not src.exists():
+        raise HTTPException(404, "dataset file missing on server")
+
+    suffix = Path(ds.filename).suffix.lower()
+    safe_name = f"anno_{uuid.uuid4().hex}{suffix}"
+    dest = UPLOAD_DIR / safe_name
+    try:
+        shutil.copyfile(src, dest)
+        df = load_dataframe(dest)
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, f"parse failed: {e}")
+    if len(df) > EVAL_MAX_ROWS:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, f"too many rows: {len(df)} > {EVAL_MAX_ROWS}")
+
+    return _build_parse_response(df, tpl, dest.name, ds.name)
 
 
 def _job_progress(db: Session, job: AnnotationJob) -> tuple[int, int]:

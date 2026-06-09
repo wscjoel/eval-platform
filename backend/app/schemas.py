@@ -23,6 +23,20 @@ class DatasetDetail(DatasetOut):
     preview: list[dict[str, Any]]
 
 
+class DatasetReplaceRequest(BaseModel):
+    """用清洗结果覆盖已有数据集内容。"""
+
+    rows: list[dict[str, Any]]
+    name: str | None = None
+
+
+class DatasetFromCleaningRequest(BaseModel):
+    """根据清洗结果新建一个数据集。"""
+
+    name: str = Field(min_length=1, max_length=255)
+    rows: list[dict[str, Any]]
+
+
 class TaskCreate(BaseModel):
     dataset_id: int
     name: str = Field(min_length=1, max_length=255)
@@ -178,6 +192,13 @@ class UploadParseResponse(BaseModel):
     total_rows: int
     suggested_mapping: dict[str, str]  # 模版字段 -> 上传列名（猜测）
     empty_columns: list[str]  # 所有行都为空的列
+
+
+class JobFromDatasetRequest(BaseModel):
+    """从已有数据集创建批注源（复制数据集文件后预解析）。"""
+
+    template_id: int
+    dataset_id: int
 
 
 class JobCreate(BaseModel):

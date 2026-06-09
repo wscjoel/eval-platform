@@ -18,15 +18,16 @@ from fastapi.responses import FileResponse
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..config import DATA_DIR
+from ..config import DATA_DIR, UPLOAD_DIR as EVAL_UPLOAD_DIR
 from ..core.cleaning import (
     SUPPORTED_EXTS,
     parse_file,
     run_script,
     write_output_file,
 )
+from ..core.io import load_dataframe
 from ..db import get_session
-from ..models import CleaningScriptTemplate
+from ..models import CleaningScriptTemplate, Dataset
 from ..schemas import (
     CleaningDownloadRequest,
     CleaningRunRequest,
@@ -114,6 +115,49 @@ async def upload(file: UploadFile = File(...)):
                 "text": parsed.get("text") or "",
                 "table": parsed.get("table") or [],
                 "columns": parsed.get("columns") or [],
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+    return out
+
+
+@router.post("/from-dataset/{dataset_id}", response_model=CleaningSourceOut)
+def from_dataset(dataset_id: int, db: Session = Depends(get_session)):
+    """把已有的评测数据集导入为一个清洗 source，避免重新上传。"""
+    ds = db.get(Dataset, dataset_id)
+    if ds is None:
+        raise HTTPException(404, "dataset not found")
+    src = EVAL_UPLOAD_DIR / ds.filename
+    if not src.exists():
+        raise HTTPException(404, "dataset file missing on server")
+    try:
+        df = load_dataframe(src)
+    except Exception as e:
+        raise HTTPException(400, f"解析失败: {e}")
+
+    table = df.to_dict(orient="records")
+    columns = list(df.columns)
+    source_id = uuid.uuid4().hex
+    parsed = {
+        "kind": "table",
+        "text": "",
+        "table": table,
+        "columns": columns,
+    }
+    out = _build_source_out(source_id, ds.name, parsed)
+    _meta_path(source_id).write_text(
+        json.dumps(
+            {
+                "filename": ds.name,
+                "ext": Path(ds.filename).suffix.lower(),
+                "kind": "table",
+                "text": "",
+                "table": table,
+                "columns": columns,
+                "from_dataset_id": ds.id,
             },
             ensure_ascii=False,
             default=str,

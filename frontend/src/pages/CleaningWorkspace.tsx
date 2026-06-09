@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import CodeMirror from "@uiw/react-codemirror";
 import { python } from "@codemirror/lang-python";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -9,13 +10,17 @@ import {
   CleaningRunResult,
   CleaningScriptTemplate,
   CleaningSource,
+  DatasetOut,
+  datasetsApi,
 } from "../api/client";
 import {
+  IconArrowLeft,
   IconBroom,
   IconCheck,
   IconCode,
   IconDownload,
   IconPlay,
+  IconPlus,
   IconRefresh,
   IconTrash,
   IconUpload,
@@ -47,23 +52,29 @@ else:
 
 export function CleaningWorkspace() {
   const [method, setMethod] = useState<CleanMethod>("script");
+  const [params] = useSearchParams();
+  const datasetId = params.get("dataset_id");
+  const initialDatasetId = datasetId ? Number(datasetId) : null;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+          <Link to="/datasets" className="btn-ghost !px-1.5 !py-1 text-ink-500" title="返回数据集管理">
+            <IconArrowLeft className="w-4 h-4" />
+          </Link>
           <IconBroom className="w-6 h-6 text-accent" />
-          数据 / 知识清洗
+          数据清洗
         </h1>
         <div className="text-sm text-ink-500 mt-1">
-          上传待清洗的数据（Excel / CSV / TXT / Markdown / Word），通过脚本或知识 Agent
-          进行批量清洗，并下载到本地。
+          上传或从已有数据集导入数据（Excel / CSV / TXT / Markdown / Word），通过脚本进行批量清洗，
+          可下载到本地或回写到数据集列表。
         </div>
       </div>
 
       <MethodTabs method={method} onChange={setMethod} />
 
-      {method === "script" ? <ScriptCleaningPanel /> : null}
+      {method === "script" ? <ScriptCleaningPanel initialDatasetId={initialDatasetId} /> : null}
     </div>
   );
 }
@@ -138,8 +149,9 @@ function DisabledTab({ label, tooltip }: { label: string; tooltip: string }) {
 
 // ---------------- 脚本清洗主面板 ----------------
 
-function ScriptCleaningPanel() {
+function ScriptCleaningPanel({ initialDatasetId }: { initialDatasetId: number | null }) {
   const [source, setSource] = useState<CleaningSource | null>(null);
+  const [sourceDatasetId, setSourceDatasetId] = useState<number | null>(null);
   const [code, setCode] = useState<string>(DEFAULT_SCRIPT);
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [runResult, setRunResult] = useState<CleaningRunResult | null>(null);
@@ -147,12 +159,36 @@ function ScriptCleaningPanel() {
     "result"
   );
   const [showSaveTpl, setShowSaveTpl] = useState(false);
+  const [showSaveDs, setShowSaveDs] = useState(false);
 
   const qc = useQueryClient();
   const templatesQ = useQuery({
     queryKey: ["cleaning-templates"],
     queryFn: cleaningApi.listTemplates,
   });
+
+  // 通过 query param 自动从数据集导入
+  const autoImportedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      initialDatasetId &&
+      autoImportedRef.current !== initialDatasetId &&
+      !source
+    ) {
+      autoImportedRef.current = initialDatasetId;
+      cleaningApi
+        .fromDataset(initialDatasetId)
+        .then((s) => {
+          setSource(s);
+          setSourceDatasetId(initialDatasetId);
+          setInputMode("table");
+          setRunResult(null);
+        })
+        .catch(() => {
+          autoImportedRef.current = null;
+        });
+    }
+  }, [initialDatasetId, source]);
 
   const runMut = useMutation({
     mutationFn: async () => {
@@ -188,15 +224,31 @@ function ScriptCleaningPanel() {
 
   const handleSourceUpload = (next: CleaningSource | null) => {
     setSource(next);
+    setSourceDatasetId(null);
     if (next) {
       setInputMode(next.kind === "table" ? "table" : "text");
     }
     setRunResult(null);
   };
 
+  const handleDatasetImport = (s: CleaningSource, datasetId: number) => {
+    setSource(s);
+    setSourceDatasetId(datasetId);
+    setInputMode("table");
+    setRunResult(null);
+  };
+
+  const canSaveAsDataset =
+    !!runResult && runResult.ok && runResult.output_kind === "table" && !!runResult.output_table;
+
   return (
     <div className="space-y-5">
-      <UploadCard source={source} onChange={handleSourceUpload} />
+      <UploadCard
+        source={source}
+        sourceDatasetId={sourceDatasetId}
+        onChange={handleSourceUpload}
+        onImportDataset={handleDatasetImport}
+      />
 
       <EditorCard
         code={code}
@@ -225,6 +277,8 @@ function ScriptCleaningPanel() {
         activeTab={outputTab}
         onTabChange={setOutputTab}
         sourceFilename={source?.filename}
+        canSaveAsDataset={canSaveAsDataset}
+        onSaveAsDataset={() => setShowSaveDs(true)}
       />
 
       {showSaveTpl && (
@@ -238,6 +292,19 @@ function ScriptCleaningPanel() {
           }}
         />
       )}
+
+      {showSaveDs && runResult && runResult.ok && runResult.output_table && (
+        <SaveAsDatasetModal
+          rows={runResult.output_table}
+          defaultDatasetId={sourceDatasetId}
+          defaultName={(source?.filename || "cleaned").replace(/\.[^.]+$/, "") + "_cleaned"}
+          onClose={() => setShowSaveDs(false)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["datasets"] });
+            setShowSaveDs(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -248,13 +315,18 @@ const ACCEPT_EXTS = [".xlsx", ".xls", ".csv", ".txt", ".md", ".markdown", ".docx
 
 function UploadCard({
   source,
+  sourceDatasetId,
   onChange,
+  onImportDataset,
 }: {
   source: CleaningSource | null;
+  sourceDatasetId: number | null;
   onChange: (s: CleaningSource | null) => void;
+  onImportDataset: (s: CleaningSource, datasetId: number) => void;
 }) {
   const [dragging, setDragging] = useState(false);
   const [uploadErr, setUploadErr] = useState<string>("");
+  const [showPicker, setShowPicker] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadMut = useMutation({
@@ -283,26 +355,43 @@ function UploadCard({
 
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-ink-200 flex items-center justify-between">
+      <div className="px-5 py-3 border-b border-ink-200 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-ink-900 text-white text-xs">
             1
           </span>
-          <span className="font-medium">上传文件</span>
+          <span className="font-medium">选择数据来源</span>
+          {sourceDatasetId != null && (
+            <span className="badge bg-amber-50 text-amber-800 ml-1">
+              已绑定数据集 #{sourceDatasetId}
+            </span>
+          )}
         </div>
-        {source && (
-          <button
-            onClick={() => {
-              onChange(null);
-              setUploadErr("");
-            }}
-            className="btn-ghost border border-ink-200 !py-1 !text-xs"
-            title="移除当前文件"
-          >
-            <IconX className="w-3.5 h-3.5" />
-            移除
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!source && (
+            <button
+              onClick={() => setShowPicker(true)}
+              className="btn-ghost border border-ink-200 !py-1 !text-xs"
+              title="从已有评测数据集导入"
+            >
+              <IconPlus className="w-3.5 h-3.5" />
+              从现有数据集导入
+            </button>
+          )}
+          {source && (
+            <button
+              onClick={() => {
+                onChange(null);
+                setUploadErr("");
+              }}
+              className="btn-ghost border border-ink-200 !py-1 !text-xs"
+              title="移除当前文件"
+            >
+              <IconX className="w-3.5 h-3.5" />
+              移除
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="p-5 space-y-4">
@@ -346,6 +435,9 @@ function UploadCard({
                 <div className="text-xs text-ink-500">
                   支持 {ACCEPT_EXTS.join(" / ")}，单文件 &lt; 10MB
                 </div>
+                <div className="text-[11px] text-ink-500 mt-1">
+                  或在右上角选择「从现有数据集导入」
+                </div>
               </>
             )}
           </label>
@@ -358,6 +450,117 @@ function UploadCard({
         )}
 
         {source && <FilePreview source={source} />}
+      </div>
+
+      {showPicker && (
+        <DatasetPickerModal
+          onClose={() => setShowPicker(false)}
+          onPicked={(s, id) => {
+            onImportDataset(s, id);
+            setShowPicker(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function DatasetPickerModal({
+  onClose,
+  onPicked,
+}: {
+  onClose: () => void;
+  onPicked: (s: CleaningSource, datasetId: number) => void;
+}) {
+  const listQ = useQuery({ queryKey: ["datasets"], queryFn: datasetsApi.list });
+  const [loadingId, setLoadingId] = useState<number | null>(null);
+  const [err, setErr] = useState("");
+
+  const handlePick = async (d: DatasetOut) => {
+    try {
+      setErr("");
+      setLoadingId(d.id);
+      const s = await cleaningApi.fromDataset(d.id);
+      onPicked(s, d.id);
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || e?.message || "导入失败");
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const datasets = listQ.data || [];
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-20 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="card p-5 w-full max-w-xl space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <div className="font-semibold">从现有数据集导入</div>
+          <button
+            onClick={onClose}
+            className="text-ink-500 hover:text-ink-900 cursor-pointer"
+            title="关闭"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="text-xs text-ink-500">
+          选择一个数据集导入到清洗工作台（仅支持表格类）。导入后默认绑定该数据集，运行后可一键覆盖回写。
+        </div>
+
+        <div className="border border-ink-200 rounded max-h-[50vh] overflow-auto">
+          {listQ.isLoading && (
+            <div className="px-3 py-6 text-center text-sm text-ink-500">加载中…</div>
+          )}
+          {!listQ.isLoading && datasets.length === 0 && (
+            <div className="px-3 py-6 text-center text-sm text-ink-500">
+              暂无数据集
+            </div>
+          )}
+          {datasets.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => handlePick(d)}
+              disabled={loadingId === d.id}
+              className="w-full text-left px-3 py-2 border-b border-ink-200 last:border-b-0 hover:bg-ink-50 cursor-pointer transition-colors flex items-start justify-between gap-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-ink-900 truncate" title={d.name}>
+                  {d.name}
+                </div>
+                <div className="text-[11px] text-ink-500 mt-0.5">
+                  {d.rows} 行 · {d.columns.length} 列
+                </div>
+              </div>
+              <span className="text-[11px] text-ink-500">
+                {loadingId === d.id ? (
+                  <IconRefresh className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  "导入"
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {err && (
+          <div className="text-xs text-danger bg-red-50 border border-red-200 rounded px-3 py-2">
+            {err}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end">
+          <button className="btn-ghost border border-ink-200" onClick={onClose}>
+            取消
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -635,12 +838,16 @@ function OutputCard({
   activeTab,
   onTabChange,
   sourceFilename,
+  canSaveAsDataset,
+  onSaveAsDataset,
 }: {
   result: CleaningRunResult | null;
   running: boolean;
   activeTab: "result" | "stdout" | "stderr" | "error";
   onTabChange: (t: "result" | "stdout" | "stderr" | "error") => void;
   sourceFilename?: string;
+  canSaveAsDataset?: boolean;
+  onSaveAsDataset?: () => void;
 }) {
   const downloadMut = useMutation({
     mutationFn: async () => {
@@ -687,18 +894,30 @@ function OutputCard({
           ))}
         </div>
         {result && result.ok && (
-          <button
-            onClick={() => downloadMut.mutate()}
-            disabled={downloadMut.isPending}
-            className="btn-accent !py-1.5 !text-xs"
-          >
-            {downloadMut.isPending ? (
-              <IconRefresh className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <IconDownload className="w-3.5 h-3.5" />
+          <div className="flex items-center gap-2">
+            {canSaveAsDataset && onSaveAsDataset && (
+              <button
+                onClick={onSaveAsDataset}
+                className="btn-ghost border border-ink-200 !py-1.5 !text-xs"
+                title="把结果保存到数据集列表"
+              >
+                <IconPlus className="w-3.5 h-3.5" />
+                保存为数据集
+              </button>
             )}
-            下载本地（{result.output_kind === "table" ? ".xlsx" : ".txt"}）
-          </button>
+            <button
+              onClick={() => downloadMut.mutate()}
+              disabled={downloadMut.isPending}
+              className="btn-accent !py-1.5 !text-xs"
+            >
+              {downloadMut.isPending ? (
+                <IconRefresh className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <IconDownload className="w-3.5 h-3.5" />
+              )}
+              下载本地（{result.output_kind === "table" ? ".xlsx" : ".txt"}）
+            </button>
+          </div>
         )}
       </div>
 
@@ -831,6 +1050,179 @@ function LogPane({ text, tone = "muted" }: { text: string; tone?: "muted" | "war
     >
       {text}
     </pre>
+  );
+}
+
+// ---------------- 保存为数据集弹窗 ----------------
+
+function SaveAsDatasetModal({
+  rows,
+  defaultDatasetId,
+  defaultName,
+  onClose,
+  onSaved,
+}: {
+  rows: Record<string, unknown>[];
+  defaultDatasetId: number | null;
+  defaultName: string;
+  onClose: () => void;
+  onSaved: (ds: { id: number; name: string }) => void;
+}) {
+  const nav = useNavigate();
+  const [mode, setMode] = useState<"overwrite" | "new">(
+    defaultDatasetId != null ? "overwrite" : "new"
+  );
+  const [overwriteId, setOverwriteId] = useState<number | null>(defaultDatasetId);
+  const [name, setName] = useState(defaultName);
+  const [err, setErr] = useState("");
+
+  const listQ = useQuery({ queryKey: ["datasets"], queryFn: datasetsApi.list });
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (mode === "overwrite") {
+        if (overwriteId == null) throw new Error("请选择要覆盖的数据集");
+        return datasetsApi.replace(overwriteId, { rows });
+      }
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error("请输入新数据集名称");
+      return datasetsApi.createFromCleaning({ name: trimmed, rows });
+    },
+    onSuccess: (data) => {
+      onSaved({ id: data.id, name: data.name });
+    },
+    onError: (e: { response?: { data?: { detail?: string } }; message?: string }) => {
+      setErr(e?.response?.data?.detail || e?.message || "保存失败");
+    },
+  });
+
+  const datasets = listQ.data || [];
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-20 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="card p-5 w-full max-w-md space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <div className="font-semibold">保存清洗结果为数据集</div>
+          <button
+            onClick={onClose}
+            className="text-ink-500 hover:text-ink-900 cursor-pointer"
+            title="关闭"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="text-xs text-ink-500">
+          清洗结果 {rows.length} 行 · {rows.length > 0 ? Object.keys(rows[0]).length : 0} 列
+        </div>
+
+        <div className="space-y-2">
+          <label
+            className={`block border rounded-md p-3 cursor-pointer transition-colors ${
+              mode === "overwrite"
+                ? "border-ink-900 bg-ink-50"
+                : "border-ink-200 hover:border-ink-700"
+            }`}
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="save-mode"
+                checked={mode === "overwrite"}
+                onChange={() => setMode("overwrite")}
+              />
+              <span className="font-medium">覆盖已有数据集</span>
+            </div>
+            {mode === "overwrite" && (
+              <div className="mt-2">
+                <select
+                  className="input"
+                  value={overwriteId ?? ""}
+                  onChange={(e) =>
+                    setOverwriteId(e.target.value ? Number(e.target.value) : null)
+                  }
+                >
+                  <option value="">请选择数据集…</option>
+                  {datasets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}（{d.rows} 行 · {d.columns.length} 列）
+                    </option>
+                  ))}
+                </select>
+                <div className="text-[11px] text-ink-500 mt-1.5">
+                  注意：已被评测任务引用的数据集无法直接覆盖，请使用「另存为新数据集」。
+                </div>
+              </div>
+            )}
+          </label>
+
+          <label
+            className={`block border rounded-md p-3 cursor-pointer transition-colors ${
+              mode === "new"
+                ? "border-ink-900 bg-ink-50"
+                : "border-ink-200 hover:border-ink-700"
+            }`}
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="save-mode"
+                checked={mode === "new"}
+                onChange={() => setMode("new")}
+              />
+              <span className="font-medium">另存为新数据集</span>
+            </div>
+            {mode === "new" && (
+              <div className="mt-2">
+                <input
+                  className="input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="新数据集名称"
+                  autoFocus
+                />
+              </div>
+            )}
+          </label>
+        </div>
+
+        {err && (
+          <div className="text-xs text-danger bg-red-50 border border-red-200 rounded px-3 py-2">
+            {err}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            className="btn-ghost border border-ink-200"
+            onClick={() => {
+              onClose();
+              nav("/datasets");
+            }}
+          >
+            前往数据集管理
+          </button>
+          <button
+            className="btn-primary"
+            disabled={mut.isPending}
+            onClick={() => mut.mutate()}
+          >
+            {mut.isPending ? (
+              <IconRefresh className="w-4 h-4 animate-spin" />
+            ) : (
+              <IconCheck className="w-4 h-4" />
+            )}
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

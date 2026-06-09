@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { api, apiKeyStore, ResultOut, ResultsPage, TaskOut, taskApi } from "../api/client";
 import {
+  IconArrowLeft,
   IconChart,
   IconCheck,
   IconChevronRight,
@@ -105,6 +106,9 @@ export function TaskDetail() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
+            <Link to="/" className="btn-ghost !px-1.5 !py-1 text-ink-500" title="返回任务记录">
+              <IconArrowLeft className="w-4 h-4" />
+            </Link>
             <h1 className="text-2xl font-semibold tracking-tight">{task.name}</h1>
             <StatusBadge status={task.status} />
           </div>

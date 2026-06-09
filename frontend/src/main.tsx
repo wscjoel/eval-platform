@@ -15,6 +15,7 @@ import { AnnotateTemplates } from "./pages/AnnotateTemplates";
 import { AnnotateNew } from "./pages/AnnotateNew";
 import { AnnotateWorkspace } from "./pages/AnnotateWorkspace";
 import { CleaningWorkspace } from "./pages/CleaningWorkspace";
+import { DatasetManage } from "./pages/DatasetManage";
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -29,6 +30,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<TaskList />} />
+            <Route path="datasets" element={<DatasetManage />} />
             <Route path="cleaning" element={<CleaningWorkspace />} />
             <Route path="prompts" element={<PromptList />} />
             <Route path="prompts/compare" element={<PromptCompare />} />

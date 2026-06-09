@@ -8,18 +8,18 @@ export function Layout() {
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 text-ink-900 font-semibold tracking-tight">
             <span className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-ink-900 text-white text-xs">
-              LE
+              AI
             </span>
-            <span>LLM 评测平台</span>
+            <span>客服AI评测台</span>
           </Link>
           <nav className="flex items-center gap-6 text-sm">
             <NavLink
-              to="/cleaning"
+              to="/datasets"
               className={({ isActive }) =>
                 `${isActive ? "text-ink-900 font-semibold" : "text-ink-700 hover:text-ink-900"} transition-colors`
               }
             >
-              数据/知识清洗
+              数据集管理
             </NavLink>
             <NavLink
               to="/annotate"
@@ -62,7 +62,7 @@ export function Layout() {
         <Outlet />
       </main>
       <footer className="max-w-6xl mx-auto px-6 py-8 text-center text-xs text-ink-500">
-        LLM Eval Platform · Minimal
+        客服AI评测台 · Minimal
       </footer>
     </div>
   );

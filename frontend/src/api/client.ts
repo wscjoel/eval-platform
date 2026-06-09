@@ -229,6 +229,54 @@ export const cleaningApi = {
   async deleteTemplate(id: number): Promise<void> {
     await api.delete(`/cleaning/script-templates/${id}`);
   },
+  async fromDataset(datasetId: number): Promise<CleaningSource> {
+    return (await api.post<CleaningSource>(`/cleaning/from-dataset/${datasetId}`)).data;
+  },
+};
+
+export const datasetsApi = {
+  async list(): Promise<DatasetOut[]> {
+    return (await api.get<DatasetOut[]>("/datasets")).data;
+  },
+  async get(id: number): Promise<DatasetDetail> {
+    return (await api.get<DatasetDetail>(`/datasets/${id}`)).data;
+  },
+  async upload(file: File): Promise<DatasetDetail> {
+    const fd = new FormData();
+    fd.append("file", file);
+    return (
+      await api.post<DatasetDetail>("/datasets", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+    ).data;
+  },
+  async remove(id: number): Promise<void> {
+    await api.delete(`/datasets/${id}`);
+  },
+  async download(id: number, filename: string): Promise<void> {
+    const resp = await api.get(`/datasets/${id}/download`, { responseType: "blob" });
+    const blob = resp.data as Blob;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+  async replace(
+    id: number,
+    payload: { rows: Record<string, unknown>[]; name?: string | null }
+  ): Promise<DatasetDetail> {
+    return (await api.put<DatasetDetail>(`/datasets/${id}/replace`, payload)).data;
+  },
+  async createFromCleaning(payload: {
+    name: string;
+    rows: Record<string, unknown>[];
+  }): Promise<DatasetDetail> {
+    return (await api.post<DatasetDetail>(`/datasets/from-cleaning`, payload)).data;
+  },
 };
 
 export const taskApi = {

@@ -8,13 +8,39 @@ from typing import Any
 
 import httpx
 
-from ..config import LLM_GW_URL
+from ..config import LLM_GW_URL, LLM_MIN_INTERVAL_S
 
 
 class LLMError(RuntimeError):
     def __init__(self, message: str, no_retry: bool = False):
         super().__init__(message)
         self.no_retry = no_retry
+
+
+# 全局节流：保证任意两次网关请求的发起间隔 >= LLM_MIN_INTERVAL_S（平台限制 1s 1 次）。
+# 每个任务由独立 asyncio.run 驱动（事件循环不同），故 Lock 按当前运行循环惰性重建，
+# 避免 "Future attached to a different loop"；_last_dispatch 为纯时间戳，跨循环持久。
+_rate_lock: asyncio.Lock | None = None
+_rate_lock_loop: Any = None
+_last_dispatch = 0.0
+
+
+def _get_rate_lock() -> asyncio.Lock:
+    global _rate_lock, _rate_lock_loop
+    loop = asyncio.get_event_loop()
+    if _rate_lock is None or _rate_lock_loop is not loop:
+        _rate_lock = asyncio.Lock()
+        _rate_lock_loop = loop
+    return _rate_lock
+
+
+async def _throttle(min_interval: float) -> None:
+    global _last_dispatch
+    async with _get_rate_lock():
+        wait = _last_dispatch + min_interval - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_dispatch = time.monotonic()
 
 
 def _build_payload(model: str, system_prompt: str, user_prompt: str, temperature: float) -> dict[str, Any]:
@@ -35,13 +61,12 @@ def _build_payload(model: str, system_prompt: str, user_prompt: str, temperature
 
 
 def _extract_text(data: Any) -> str:
-    """优先解析 OpenAI Chat Completions 结构，兼容其它常见返回。"""
+    """解析 OpenAI Chat Completions 结构：choices[0].message.content。"""
     if isinstance(data, str):
         return data
     if not isinstance(data, dict):
         return str(data)
 
-    # OpenAI Chat Completions: choices[0].message.content
     choices = data.get("choices")
     if isinstance(choices, list) and choices:
         ch = choices[0]
@@ -50,54 +75,6 @@ def _extract_text(data: Any) -> str:
             content = msg.get("content")
             if isinstance(content, str) and content.strip():
                 return content
-            # 兼容流式 / 旧版字段
-            if isinstance(ch.get("text"), str):
-                return ch["text"]
-            delta = ch.get("delta") or {}
-            if isinstance(delta.get("content"), str):
-                return delta["content"]
-
-    # Gemini 风格
-    candidates = data.get("candidates")
-    if isinstance(candidates, list) and candidates:
-        cand = candidates[0]
-        if isinstance(cand, dict):
-            content = cand.get("content")
-            if isinstance(content, dict):
-                parts = content.get("parts")
-                if isinstance(parts, list):
-                    texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
-                    out = "".join(texts).strip()
-                    if out:
-                        return out
-            if isinstance(cand.get("text"), str):
-                return cand["text"]
-
-    # Anthropic 风格
-    content = data.get("content")
-    if isinstance(content, list):
-        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-        out = "".join(texts).strip()
-        if out:
-            return out
-
-    # OpenAI Responses 风格
-    output = data.get("output")
-    if isinstance(output, list):
-        chunks: list[str] = []
-        for item in output:
-            if isinstance(item, dict):
-                for c in item.get("content", []) or []:
-                    if isinstance(c, dict):
-                        if isinstance(c.get("text"), str):
-                            chunks.append(c["text"])
-                        elif isinstance(c.get("output_text"), str):
-                            chunks.append(c["output_text"])
-        out = "".join(chunks).strip()
-        if out:
-            return out
-    if isinstance(data.get("output_text"), str):
-        return data["output_text"]
 
     return ""
 
@@ -124,6 +101,7 @@ async def call_llm(
 
     last_err: Exception | None = None
     for attempt in range(max_retries + 1):
+        await _throttle(LLM_MIN_INTERVAL_S)
         t0 = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:

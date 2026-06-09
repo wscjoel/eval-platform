@@ -1,14 +1,17 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AnnoJob,
   AnnotationTemplate,
   api,
+  DatasetOut,
+  datasetsApi,
   UploadParseResponse,
 } from "../api/client";
+import { DatasetPreviewModal } from "../components/DatasetPreviewModal";
 import { DimensionConfigModal } from "../components/DimensionConfigModal";
-import { IconCheck, IconSettings, IconUpload } from "../components/Icon";
+import { IconArrowLeft, IconCheck, IconRefresh, IconSettings } from "../components/Icon";
 
 type Step = 1 | 2 | 3;
 
@@ -36,8 +39,13 @@ export function AnnotateNew() {
           <span>/</span>
           <span>新建批注</span>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight mt-1">新建批注任务</h1>
-        <p className="text-sm text-ink-500 mt-1">三步完成：选模版 → 上传与字段映射 → 选维度与配置选项</p>
+        <div className="flex items-center gap-2 mt-1">
+          <Link to="/annotate" className="btn-ghost !px-1.5 !py-1 text-ink-500" title="返回人工批注">
+            <IconArrowLeft className="w-4 h-4" />
+          </Link>
+          <h1 className="text-2xl font-semibold tracking-tight">新建批注任务</h1>
+        </div>
+        <p className="text-sm text-ink-500 mt-1">三步完成：选模版 → 选择数据集与字段映射 → 选维度与配置选项</p>
       </div>
 
       <Steps step={step} />
@@ -88,7 +96,7 @@ export function AnnotateNew() {
 function Steps({ step }: { step: Step }) {
   const items = [
     { k: 1, label: "选模版" },
-    { k: 2, label: "上传与字段映射" },
+    { k: 2, label: "选择数据集与字段映射" },
     { k: 3, label: "选维度与选项" },
   ];
   return (
@@ -184,23 +192,28 @@ function StepUploadAndMap({
   onBack: () => void;
   onNext: () => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [drag, setDrag] = useState(false);
+  const [pickedId, setPickedId] = useState<number | null>(null);
+  const [previewId, setPreviewId] = useState<number | null>(null);
 
-  const up = useMutation({
-    mutationFn: async (file: File) => {
-      const fd = new FormData();
-      fd.append("template_id", String(template.id));
-      fd.append("file", file);
-      const r = await api.post<UploadParseResponse>("/anno/jobs/upload", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
+  const listQ = useQuery({ queryKey: ["datasets"], queryFn: datasetsApi.list });
+  const datasets: DatasetOut[] = listQ.data || [];
+
+  const pick = useMutation({
+    mutationFn: async (datasetId: number) => {
+      const r = await api.post<UploadParseResponse>("/anno/jobs/from-dataset", {
+        template_id: template.id,
+        dataset_id: datasetId,
       });
       return r.data;
     },
     onSuccess: setUpload,
   });
 
-  const onPick = (f?: File | null) => { if (f) up.mutate(f); };
+  const onPickDataset = (datasetId: number) => {
+    setPickedId(datasetId);
+    setUpload(null);
+    pick.mutate(datasetId);
+  };
 
   const allFields = [...template.data_columns, ...template.annotation_columns];
   const unmatched = upload
@@ -213,39 +226,111 @@ function StepUploadAndMap({
 
   return (
     <div className="space-y-4">
-      <div className="card p-6">
-        <label
-          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-          onDragLeave={() => setDrag(false)}
-          onDrop={(e) => { e.preventDefault(); setDrag(false); onPick(e.dataTransfer.files?.[0]); }}
-          className={`flex flex-col items-center justify-center gap-2 py-10 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-            drag ? "border-accent bg-amber-50/40" : "border-ink-200 hover:border-ink-700 hover:bg-ink-50"
-          }`}
-        >
-          <input
-            ref={inputRef} type="file" className="hidden" accept=".xlsx,.xls,.csv"
-            onChange={(e) => onPick(e.target.files?.[0])}
-          />
-          <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-ink-100 text-ink-700">
-            <IconUpload className="w-5 h-5" />
-          </span>
-          <div className="text-sm text-ink-900 font-medium">
-            {upload ? `已上传：${upload.source_filename}（${upload.total_rows} 行 / ${upload.columns.length} 列）` : "点击或拖拽上传 .xlsx / .xls / .csv"}
-          </div>
-          <div className="text-xs text-ink-500">最大 5MB / 500 行</div>
-          {up.isPending && <div className="text-xs text-ink-700 mt-1">解析中…</div>}
-          {up.isError && (
-            <div className="text-xs text-danger mt-1">
-              {(up.error as any)?.response?.data?.detail || String(up.error)}
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <div className="text-sm font-semibold text-ink-900">选择要批注的数据集</div>
+            <div className="text-xs text-ink-500 mt-0.5">
+              从已保存的评测数据集中选择一个。若列表为空，请先到
+              <Link to="/datasets" className="text-accent hover:underline mx-1">
+                数据集管理
+              </Link>
+              新建数据集。点击名称可预览。
             </div>
-          )}
-        </label>
+          </div>
+          <Link to="/datasets" className="btn-ghost border border-ink-200 !py-1 !text-xs">
+            前往数据集管理
+          </Link>
+        </div>
+
+        {listQ.isLoading && (
+          <div className="px-3 py-10 text-center text-sm text-ink-500">加载中…</div>
+        )}
+        {!listQ.isLoading && datasets.length === 0 && (
+          <div className="px-3 py-10 text-center text-sm text-ink-500">
+            暂无数据集。请到「数据集管理」上传一个数据集后再来新建批注。
+          </div>
+        )}
+
+        {datasets.length > 0 && (
+          <div className="border border-ink-200 rounded overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50 text-ink-700 text-left">
+                <tr>
+                  <th className="px-3 py-2 font-medium w-10"></th>
+                  <th className="px-3 py-2 font-medium">名称</th>
+                  <th className="px-3 py-2 font-medium">行数</th>
+                  <th className="px-3 py-2 font-medium">列数</th>
+                </tr>
+              </thead>
+              <tbody>
+                {datasets.map((d) => {
+                  const active = pickedId === d.id;
+                  return (
+                    <tr
+                      key={d.id}
+                      onClick={() => onPickDataset(d.id)}
+                      className={`border-t border-ink-200 cursor-pointer transition-colors ${
+                        active ? "bg-amber-50/60" : "hover:bg-ink-50/60"
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="radio"
+                          name="pick-anno-dataset"
+                          checked={active}
+                          onChange={() => onPickDataset(d.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          className="text-ink-900 font-medium truncate hover:text-accent transition-colors cursor-pointer text-left"
+                          title="点击预览数据集"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewId(d.id);
+                          }}
+                        >
+                          {d.name}
+                        </button>
+                        <div className="text-[11px] text-ink-500 mt-0.5 truncate">
+                          {d.columns.slice(0, 6).join(" · ")}
+                          {d.columns.length > 6 ? ` … +${d.columns.length - 6}` : ""}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-ink-700">{d.rows}</td>
+                      <td className="px-3 py-2 tabular-nums text-ink-700">{d.columns.length}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {pick.isPending && (
+          <div className="flex items-center gap-2 text-xs text-ink-700 mt-3">
+            <IconRefresh className="w-4 h-4 animate-spin" />
+            解析数据集中…
+          </div>
+        )}
+        {pick.isError && (
+          <div className="text-xs text-danger mt-3">
+            加载失败：{(pick.error as any)?.response?.data?.detail || String(pick.error)}
+          </div>
+        )}
+        {upload && (
+          <div className="text-xs text-success mt-3">
+            已选择：{upload.source_filename}（{upload.total_rows} 行 / {upload.columns.length} 列）
+          </div>
+        )}
       </div>
 
       {upload && (
         <div className="card p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold">字段映射（模版字段 ← 上传列）</h3>
+            <h3 className="text-sm font-semibold">字段映射（模版字段 ← 数据集列）</h3>
             <div className="text-xs text-ink-500">
               {unmatched.length === 0 ? <span className="text-success">全部已映射</span> : `${unmatched.length} 个字段未映射`}
             </div>
@@ -286,6 +371,10 @@ function StepUploadAndMap({
           下一步 →
         </button>
       </div>
+
+      {previewId != null && (
+        <DatasetPreviewModal datasetId={previewId} onClose={() => setPreviewId(null)} />
+      )}
     </div>
   );
 }
