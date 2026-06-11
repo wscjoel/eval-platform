@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..config import DATA_DIR, UPLOAD_DIR as EVAL_UPLOAD_DIR
+from ..config import DATA_DIR, EVAL_MAX_FILE_MB, UPLOAD_DIR as EVAL_UPLOAD_DIR
 from ..core.cleaning import (
     SUPPORTED_EXTS,
     parse_file,
@@ -47,7 +47,7 @@ EXPORT_DIR = CLEANING_DIR / "exports"
 for d in (CLEANING_DIR, UPLOAD_DIR, META_DIR, EXPORT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-MAX_UPLOAD_MB = 10
+MAX_UPLOAD_MB = EVAL_MAX_FILE_MB
 PREVIEW_TEXT_CHARS = 5000
 PREVIEW_TABLE_ROWS = 50
 

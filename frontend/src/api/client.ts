@@ -5,6 +5,24 @@ export const api = axios.create({
   timeout: 120_000,
 });
 
+// 统一异常增强：对 413（Request Entity Too Large）给出明确文案，
+// 这通常由 Nginx / 网关 client_max_body_size 限制触发，而非业务逻辑。
+api.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    const status = error?.response?.status;
+    if (status === 413) {
+      const friendly =
+        "请求体过大被网关拦截（HTTP 413）。请联系管理员调高反向代理的 client_max_body_size，或减小本次上传文件 / 数据量后重试。";
+      error.message = friendly;
+      if (error.response) {
+        error.response.data = { detail: friendly };
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export type DatasetOut = {
   id: number;
   name: string;
