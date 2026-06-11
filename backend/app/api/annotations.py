@@ -17,12 +17,14 @@ from sqlalchemy.orm import Session
 from ..config import EVAL_MAX_FILE_MB, EVAL_MAX_ROWS, EXPORT_DIR, UPLOAD_DIR
 from ..core.io import load_dataframe
 from ..db import get_session
+from ..deps import ensure_owner, get_current_user, is_admin
 from ..models import (
     Annotation,
     AnnotationDimensionConfig,
     AnnotationJob,
     AnnotationTemplate,
     Dataset,
+    User,
 )
 from ..schemas import (
     AnnotationTemplateCreate,
@@ -272,7 +274,11 @@ def upload_and_parse(
 
 
 @router.post("/jobs/from-dataset", response_model=UploadParseResponse)
-def from_dataset(payload: JobFromDatasetRequest, db: Session = Depends(get_session)):
+def from_dataset(
+    payload: JobFromDatasetRequest,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """从已有评测数据集创建批注源：复制数据集文件后预解析。
 
     复制（而非直接引用）数据集文件，避免删除批注任务时误删原数据集文件。
@@ -283,6 +289,7 @@ def from_dataset(payload: JobFromDatasetRequest, db: Session = Depends(get_sessi
     ds = db.get(Dataset, payload.dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     src = UPLOAD_DIR / ds.filename
     if not src.exists():
         raise HTTPException(404, "dataset file missing on server")
@@ -342,7 +349,11 @@ def _job_to_out(db: Session, job: AnnotationJob) -> JobOut:
 
 
 @router.post("/jobs", response_model=JobOut)
-def create_job(payload: JobCreate, db: Session = Depends(get_session)):
+def create_job(
+    payload: JobCreate,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     tpl = db.get(AnnotationTemplate, payload.template_id)
     if tpl is None:
         raise HTTPException(404, "template not found")
@@ -363,6 +374,7 @@ def create_job(payload: JobCreate, db: Session = Depends(get_session)):
         total_rows=len(df),
         column_mapping=payload.column_mapping,
         selected_dimensions=payload.selected_dimensions,
+        user_id=user.id,
     )
     db.add(job)
     db.commit()
@@ -371,20 +383,27 @@ def create_job(payload: JobCreate, db: Session = Depends(get_session)):
 
 
 @router.get("/jobs", response_model=list[JobOut])
-def list_jobs(db: Session = Depends(get_session)):
-    rows = (
-        db.execute(select(AnnotationJob).order_by(desc(AnnotationJob.created_at)))
-        .scalars()
-        .all()
-    )
+def list_jobs(
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(AnnotationJob).order_by(desc(AnnotationJob.created_at))
+    if not is_admin(user):
+        stmt = stmt.where(AnnotationJob.user_id == user.id)
+    rows = db.execute(stmt).scalars().all()
     return [_job_to_out(db, j) for j in rows]
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail)
-def get_job(job_id: int, db: Session = Depends(get_session)):
+def get_job(
+    job_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     job = db.get(AnnotationJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    ensure_owner(user, job.user_id)
     out = _job_to_out(db, job)
     tpl = job.template
     return JobDetail(
@@ -395,10 +414,15 @@ def get_job(job_id: int, db: Session = Depends(get_session)):
 
 
 @router.delete("/jobs/{job_id}")
-def delete_job(job_id: int, db: Session = Depends(get_session)):
+def delete_job(
+    job_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     job = db.get(AnnotationJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    ensure_owner(user, job.user_id)
     # 删除源文件
     (UPLOAD_DIR / job.source_path).unlink(missing_ok=True)
     db.delete(job)
@@ -433,10 +457,12 @@ def list_rows(
     job_id: int,
     status: str = "all",  # all | annotated | pending
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     job = db.get(AnnotationJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    ensure_owner(user, job.user_id)
     df = _load_job_df(job)
     tpl = job.template
     data_fields = list(tpl.data_columns or []) if tpl else []
@@ -473,10 +499,16 @@ def list_rows(
 
 
 @router.get("/jobs/{job_id}/rows/{row_index}", response_model=RowDetail)
-def get_row(job_id: int, row_index: int, db: Session = Depends(get_session)):
+def get_row(
+    job_id: int,
+    row_index: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     job = db.get(AnnotationJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    ensure_owner(user, job.user_id)
     df = _load_job_df(job)
     if row_index < 0 or row_index >= len(df):
         raise HTTPException(404, "row out of range")
@@ -506,10 +538,12 @@ def save_row(
     row_index: int,
     payload: SaveAnnotationsIn,
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     job = db.get(AnnotationJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    ensure_owner(user, job.user_id)
     if row_index < 0 or row_index >= job.total_rows:
         raise HTTPException(404, "row out of range")
     existing = db.execute(
@@ -555,10 +589,15 @@ def _stringify(v: str) -> str:
 
 
 @router.get("/jobs/{job_id}/export.xlsx")
-def export_job(job_id: int, db: Session = Depends(get_session)):
+def export_job(
+    job_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     job = db.get(AnnotationJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
+    ensure_owner(user, job.user_id)
     df = _load_job_df(job)
     tpl = job.template
     if tpl is None:

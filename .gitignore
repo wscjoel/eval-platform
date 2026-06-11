@@ -2,6 +2,7 @@ backend/.venv/
 backend/.env
 
 backend/data/eval.db
+backend/data/.secret_key
 backend/data/uploads/*
 backend/data/exports/*
 backend/data/cleaning/uploads/*

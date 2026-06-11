@@ -8,6 +8,81 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+# ---------------- 账号与登录 ----------------
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    password: str = Field(min_length=6, max_length=128)
+    display_name: str = ""
+    role: str = Field(default="user", pattern="^(admin|user)$")
+
+
+class UserUpdateRequest(BaseModel):
+    display_name: str | None = None
+    password: str | None = Field(default=None, min_length=6, max_length=128)
+    is_active: bool | None = None
+    role: str | None = Field(default=None, pattern="^(admin|user)$")
+
+
+class LoginRecordOut(BaseModel):
+    id: int
+    user_id: int | None
+    username: str
+    success: bool
+    ip: str
+    user_agent: str
+    login_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LoginRecordsPage(BaseModel):
+    total: int
+    items: list[LoginRecordOut]
+
+
+class UserDataStats(BaseModel):
+    """单个用户的评测数据统计。"""
+
+    user: UserOut
+    dataset_count: int
+    task_count: int
+    anno_job_count: int
+    login_count: int
+
+
+class UserDataDetail(BaseModel):
+    """管理员下钻：某用户的数据明细。"""
+
+    user: UserOut
+    datasets: list["DatasetOut"]
+    tasks: list["TaskOut"]
+    anno_jobs: list["JobOut"]
+
+
 class DatasetOut(BaseModel):
     id: int
     name: str
@@ -318,3 +393,7 @@ class CleaningScriptTemplateOut(CleaningScriptTemplateBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# UserDataDetail 前向引用 DatasetOut/TaskOut/JobOut，文件末尾统一重建
+UserDataDetail.model_rebuild()

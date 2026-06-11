@@ -13,7 +13,8 @@ from ..config import EXPORT_DIR, MODEL_LIST, UPLOAD_DIR, get_api_key
 from ..core.io import load_dataframe, write_results_xlsx
 from ..core.runner import request_cancel, retry_row, run_task, trial_run_one
 from ..db import get_session
-from ..models import Dataset, Result, Task
+from ..deps import ensure_owner, get_current_user, is_admin
+from ..models import Dataset, Result, Task, User
 from ..schemas import (
     ResultOut,
     ResultsPage,
@@ -32,7 +33,15 @@ def list_models():
 
 
 @router.post("/tasks/trial", response_model=TrialResponse)
-async def trial(req: TrialRequest):
+async def trial(
+    req: TrialRequest,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    ds = db.get(Dataset, req.dataset_id)
+    if ds is None:
+        raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     api_key = get_api_key(req.api_key)
     if not api_key:
         raise HTTPException(400, "Missing API key (set LLM_GW_API_KEY env or provide api_key)")
@@ -58,6 +67,7 @@ def create_task(
     payload: TaskCreate,
     bg: BackgroundTasks,
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     if payload.model not in MODEL_LIST:
         raise HTTPException(400, "invalid model")
@@ -68,6 +78,7 @@ def create_task(
     ds = db.get(Dataset, payload.dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
 
     running = db.execute(
         select(func.count(Task.id)).where(Task.status == "running")
@@ -84,6 +95,7 @@ def create_task(
         temperature=payload.temperature,
         status="pending",
         total=ds.rows,
+        user_id=user.id,
     )
     db.add(task)
     db.commit()
@@ -99,24 +111,40 @@ def _run_task_bg(task_id: int, api_key: str) -> None:
 
 
 @router.get("/tasks", response_model=list[TaskOut])
-def list_tasks(db: Session = Depends(get_session)):
-    rows = db.execute(select(Task).order_by(desc(Task.created_at))).scalars().all()
+def list_tasks(
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(Task).order_by(desc(Task.created_at))
+    if not is_admin(user):
+        stmt = stmt.where(Task.user_id == user.id)
+    rows = db.execute(stmt).scalars().all()
     return [TaskOut.model_validate(r) for r in rows]
 
 
 @router.get("/tasks/{task_id}", response_model=TaskOut)
-def get_task(task_id: int, db: Session = Depends(get_session)):
+def get_task(
+    task_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     t = db.get(Task, task_id)
     if t is None:
         raise HTTPException(404, "task not found")
+    ensure_owner(user, t.user_id)
     return TaskOut.model_validate(t)
 
 
 @router.delete("/tasks/{task_id}")
-def delete_task(task_id: int, db: Session = Depends(get_session)):
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     t = db.get(Task, task_id)
     if t is None:
         raise HTTPException(404, "task not found")
+    ensure_owner(user, t.user_id)
     if t.status in ("running", "stopping"):
         raise HTTPException(400, "cannot delete a running task")
     db.delete(t)
@@ -125,10 +153,15 @@ def delete_task(task_id: int, db: Session = Depends(get_session)):
 
 
 @router.post("/tasks/{task_id}/stop", response_model=TaskOut)
-def stop_task(task_id: int, db: Session = Depends(get_session)):
+def stop_task(
+    task_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     t = db.get(Task, task_id)
     if t is None:
         raise HTTPException(404, "task not found")
+    ensure_owner(user, t.user_id)
     if t.status not in ("running", "pending"):
         raise HTTPException(400, f"cannot stop a task in status: {t.status}")
     request_cancel(task_id)
@@ -145,10 +178,12 @@ def get_results(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     t = db.get(Task, task_id)
     if t is None:
         raise HTTPException(404, "task not found")
+    ensure_owner(user, t.user_id)
 
     stmt = select(Result).where(Result.task_id == task_id)
     if status:
@@ -186,7 +221,12 @@ async def retry_one(
     row_index: int,
     api_key: str | None = None,
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
+    t = db.get(Task, task_id)
+    if t is None:
+        raise HTTPException(404, "task not found")
+    ensure_owner(user, t.user_id)
     key = get_api_key(api_key)
     if not key:
         raise HTTPException(400, "Missing API key")
@@ -201,10 +241,15 @@ async def retry_one(
 
 
 @router.get("/tasks/{task_id}/export.xlsx")
-def export_xlsx(task_id: int, db: Session = Depends(get_session)):
+def export_xlsx(
+    task_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     t = db.get(Task, task_id)
     if t is None:
         raise HTTPException(404, "task not found")
+    ensure_owner(user, t.user_id)
     ds = db.get(Dataset, t.dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset missing")

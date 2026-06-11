@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from ..config import EVAL_MAX_FILE_MB, EVAL_MAX_ROWS, UPLOAD_DIR
 from ..core.io import df_preview, load_dataframe
 from ..db import get_session
-from ..models import Dataset
+from ..deps import ensure_owner, get_current_user, is_admin
+from ..models import Dataset, User
 from ..schemas import (
     DatasetDetail,
     DatasetFromCleaningRequest,
@@ -32,6 +33,7 @@ _ALLOWED_SUFFIX = {".xlsx", ".xls", ".csv"}
 async def upload_dataset(
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     if not file.filename:
         raise HTTPException(400, "missing filename")
@@ -67,6 +69,7 @@ async def upload_dataset(
         filename=safe_name,
         rows=len(df),
         columns_json=columns,
+        user_id=user.id,
     )
     db.add(ds)
     db.commit()
@@ -84,8 +87,14 @@ async def upload_dataset(
 
 
 @router.get("", response_model=list[DatasetOut])
-def list_datasets(db: Session = Depends(get_session)):
-    rows = db.execute(select(Dataset).order_by(desc(Dataset.created_at))).scalars().all()
+def list_datasets(
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(Dataset).order_by(desc(Dataset.created_at))
+    if not is_admin(user):
+        stmt = stmt.where(Dataset.user_id == user.id)
+    rows = db.execute(stmt).scalars().all()
     return [
         DatasetOut(
             id=r.id,
@@ -100,10 +109,15 @@ def list_datasets(db: Session = Depends(get_session)):
 
 
 @router.get("/{dataset_id}", response_model=DatasetDetail)
-def get_dataset(dataset_id: int, db: Session = Depends(get_session)):
+def get_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     ds = db.get(Dataset, dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     df = load_dataframe(UPLOAD_DIR / ds.filename)
     return DatasetDetail(
         id=ds.id,
@@ -117,10 +131,15 @@ def get_dataset(dataset_id: int, db: Session = Depends(get_session)):
 
 
 @router.delete("/{dataset_id}")
-def delete_dataset(dataset_id: int, db: Session = Depends(get_session)):
+def delete_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     ds = db.get(Dataset, dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     if ds.tasks:
         raise HTTPException(400, "dataset has tasks, delete tasks first")
     (UPLOAD_DIR / ds.filename).unlink(missing_ok=True)
@@ -130,10 +149,15 @@ def delete_dataset(dataset_id: int, db: Session = Depends(get_session)):
 
 
 @router.get("/{dataset_id}/download")
-def download_dataset(dataset_id: int, db: Session = Depends(get_session)):
+def download_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     ds = db.get(Dataset, dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     src = UPLOAD_DIR / ds.filename
     if not src.exists():
         raise HTTPException(404, "file missing on server")
@@ -167,10 +191,12 @@ def replace_dataset(
     dataset_id: int,
     payload: DatasetReplaceRequest,
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     ds = db.get(Dataset, dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     if ds.tasks:
         raise HTTPException(
             409,
@@ -212,6 +238,7 @@ def replace_dataset(
 def create_from_cleaning(
     payload: DatasetFromCleaningRequest,
     db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     if not payload.rows:
         raise HTTPException(400, "rows is empty")
@@ -236,6 +263,7 @@ def create_from_cleaning(
         filename=safe_name,
         rows=rows_count,
         columns_json=columns,
+        user_id=user.id,
     )
     db.add(ds)
     db.commit()

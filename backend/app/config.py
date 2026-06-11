@@ -31,6 +31,34 @@ MODEL_LIST = [
 ]
 DEFAULT_MODEL = MODEL_LIST[0]
 
+# ---------------- 账号与会话 ----------------
+
+AUTH_COOKIE_NAME = "eval_session"
+AUTH_TOKEN_TTL_S = int(os.getenv("AUTH_TOKEN_TTL_S", str(7 * 24 * 3600)))  # 默认 7 天
+
+# 初始管理员账号（首次启动自动创建，之后修改环境变量不会覆盖已有账号）
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+
+_SECRET_FILE = DATA_DIR / ".secret_key"
+
+
+def _load_secret_key() -> str:
+    """会话签名密钥：优先环境变量；否则生成并持久化到文件，保证重启后会话不失效。"""
+    env_val = os.getenv("SECRET_KEY")
+    if env_val:
+        return env_val
+    if _SECRET_FILE.exists():
+        return _SECRET_FILE.read_text(encoding="utf-8").strip()
+    import secrets as _secrets
+
+    key = _secrets.token_hex(32)
+    _SECRET_FILE.write_text(key, encoding="utf-8")
+    return key
+
+
+SECRET_KEY = _load_secret_key()
+
 
 def get_api_key(override: str | None = None) -> str | None:
     """返回 API Key：优先使用前端传入的覆盖值，否则读环境变量。"""

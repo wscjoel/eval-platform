@@ -27,7 +27,8 @@ from ..core.cleaning import (
 )
 from ..core.io import load_dataframe
 from ..db import get_session
-from ..models import CleaningScriptTemplate, Dataset
+from ..deps import ensure_owner, get_current_user
+from ..models import CleaningScriptTemplate, Dataset, User
 from ..schemas import (
     CleaningDownloadRequest,
     CleaningRunRequest,
@@ -125,11 +126,16 @@ async def upload(file: UploadFile = File(...)):
 
 
 @router.post("/from-dataset/{dataset_id}", response_model=CleaningSourceOut)
-def from_dataset(dataset_id: int, db: Session = Depends(get_session)):
+def from_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     """把已有的评测数据集导入为一个清洗 source，避免重新上传。"""
     ds = db.get(Dataset, dataset_id)
     if ds is None:
         raise HTTPException(404, "dataset not found")
+    ensure_owner(user, ds.user_id)
     src = EVAL_UPLOAD_DIR / ds.filename
     if not src.exists():
         raise HTTPException(404, "dataset file missing on server")

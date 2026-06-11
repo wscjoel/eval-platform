@@ -5,21 +5,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api import admin as admin_api
 from .api import annotations as annotations_api
+from .api import auth as auth_api
 from .api import cleaning as cleaning_api
 from .api import datasets as datasets_api
 from .api import prompts as prompts_api
 from .api import tasks as tasks_api
 from .config import LLM_GW_API_KEY_ENV
 from .db import init_db
+from .deps import get_current_user
 
-app = FastAPI(title="客服AI评测台", version="0.1.0")
+app = FastAPI(title="客服AI评测台", version="0.2.0")
 
+# Cookie 会话依赖同源凭证；本地 Vite 代理与生产同源部署均不跨域。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,11 +32,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(datasets_api.router)
-app.include_router(tasks_api.router)
-app.include_router(prompts_api.router)
-app.include_router(annotations_api.router)
-app.include_router(cleaning_api.router)
+app.include_router(auth_api.router)
+app.include_router(admin_api.router)
+
+# 业务路由统一要求登录
+_auth_required = [Depends(get_current_user)]
+app.include_router(datasets_api.router, dependencies=_auth_required)
+app.include_router(tasks_api.router, dependencies=_auth_required)
+app.include_router(prompts_api.router, dependencies=_auth_required)
+app.include_router(annotations_api.router, dependencies=_auth_required)
+app.include_router(cleaning_api.router, dependencies=_auth_required)
 
 
 @app.on_event("startup")

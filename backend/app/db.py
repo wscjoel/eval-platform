@@ -35,6 +35,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite_columns()
     _seed_default_annotation_template()
+    _seed_admin_user()
 
 
 def _migrate_sqlite_columns() -> None:
@@ -48,6 +49,55 @@ def _migrate_sqlite_columns() -> None:
                 "ALTER TABLE prompt_templates ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''"
             )
             conn.commit()
+
+        # 账号体系：给业务表补 user_id 归属列
+        for table in ("datasets", "tasks", "annotation_jobs"):
+            tcols = {r[1] for r in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if tcols and "user_id" not in tcols:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER")
+                conn.commit()
+
+
+def _seed_admin_user() -> None:
+    """首次启动创建初始管理员账号，并把存量无主数据归属给管理员。"""
+    import logging
+
+    from .config import ADMIN_PASSWORD, ADMIN_USERNAME
+    from .core.security import hash_password
+    from .models import AnnotationJob, Dataset, Task, User
+
+    log = logging.getLogger("uvicorn.error")
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.role == "admin").first()
+        if admin is None:
+            admin = User(
+                username=ADMIN_USERNAME,
+                password_hash=hash_password(ADMIN_PASSWORD),
+                display_name="管理员",
+                role="admin",
+            )
+            db.add(admin)
+            db.commit()
+            db.refresh(admin)
+            log.warning(
+                "已创建初始管理员账号 username=%s（密码来自 ADMIN_PASSWORD 环境变量，"
+                "默认 admin123，生产环境请务必修改）",
+                ADMIN_USERNAME,
+            )
+        # 存量无主数据归属管理员
+        changed = False
+        for model in (Dataset, Task, AnnotationJob):
+            n = (
+                db.query(model)
+                .filter(model.user_id.is_(None))
+                .update({"user_id": admin.id}, synchronize_session=False)
+            )
+            changed = changed or bool(n)
+        if changed:
+            db.commit()
+    finally:
+        db.close()
 
 
 def _seed_default_annotation_template() -> None:

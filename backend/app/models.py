@@ -15,6 +15,38 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+    display_name: Mapped[str] = mapped_column(String(128), default="")
+    role: Mapped[str] = mapped_column(String(16), default="user")  # admin / user
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    login_records: Mapped[List["LoginRecord"]] = relationship(back_populates="user")
+
+
+class LoginRecord(Base):
+    __tablename__ = "login_records"
+    __table_args__ = (Index("ix_login_records_user_time", "user_id", "login_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    username: Mapped[str] = mapped_column(String(64), default="")  # 登录时输入的用户名（失败时也记录）
+    success: Mapped[bool] = mapped_column(default=True)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(512), default="")
+    login_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    user: Mapped[Optional["User"]] = relationship(back_populates="login_records")
+
+
 class Dataset(Base):
     __tablename__ = "datasets"
 
@@ -23,6 +55,9 @@ class Dataset(Base):
     filename: Mapped[str] = mapped_column(String(512))
     rows: Mapped[int] = mapped_column(Integer)
     columns_json: Mapped[List[str]] = mapped_column(JSON)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     tasks: Mapped[List["Task"]] = relationship(back_populates="dataset", cascade="all,delete")
@@ -44,6 +79,9 @@ class Task(Base):
     succeeded: Mapped[int] = mapped_column(Integer, default=0)
     failed: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str] = mapped_column(Text, default="")
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -135,6 +173,9 @@ class AnnotationJob(Base):
     total_rows: Mapped[int] = mapped_column(Integer, default=0)
     column_mapping: Mapped[dict] = mapped_column(JSON, default=dict)  # 模版字段->上传列名
     selected_dimensions: Mapped[List[str]] = mapped_column(JSON, default=list)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 

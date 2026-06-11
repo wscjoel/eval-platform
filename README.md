@@ -2,6 +2,8 @@
 
 一个简洁的内网评测工具：上传 Excel → 写提示词 + JSON Schema → 自动调用京东 LLM 网关评测 → 查看/筛选结果 → 一键导出 Excel。
 
+支持多账号：管理员在后台创建账号分发使用，每人只能看到自己的数据；管理后台可查看所有用户的评测数据与登录记录。
+
 技术栈：FastAPI + SQLite + httpx + pandas / React + Vite + Tailwind + TanStack Query。
 
 ## 目录
@@ -9,8 +11,20 @@
 ```
 eval-platform/
 ├── backend/   FastAPI 后端
-└── frontend/  React 前端
+├── frontend/  React 前端
+└── deploy/    部署脚本与 systemd 服务文件
 ```
+
+## 账号与权限
+
+- 所有页面和 `/api/*` 接口均需登录（Cookie 会话，默认 7 天有效）。
+- 首次启动自动创建管理员账号：用户名/密码来自环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD`（默认 `admin` / `admin123`，**生产环境务必修改**）。
+- 不开放注册；管理员在「管理后台 → 用户管理」创建账号发给使用者。
+- 数据隔离：普通用户只能看到自己上传的数据集、评测任务和批注作业；管理员可见全部。
+- 管理后台三个页面：
+  - **数据总览**：每位用户的数据集/任务/批注作业数量与登录次数，点击行下钻明细
+  - **用户管理**：创建账号、重置密码、启用/禁用、删除
+  - **登录记录**：所有账号的登录历史（含失败尝试、IP、浏览器 UA）
 
 ## 启动
 
@@ -63,6 +77,34 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 > 部署到平台时务必把仓库根目录中的 `backend/app/static/` 产物提交入库（或在 CI/CD 中执行上述 `npm run build`），否则平台仅托管源码会再次白屏。
 
+### 4. 内网服务器一键部署（systemd + Nginx）
+
+服务器需预装 `python3 (>=3.9)`、`node (>=18)`、`git`。
+
+```bash
+# 首次
+git clone https://github.com/wscjoel/eval-platform.git /opt/eval-platform
+cd /opt/eval-platform
+bash deploy/deploy.sh        # 安装依赖 + 构建前端 + 生成 .env
+
+# 编辑生产配置：填 LLM_GW_API_KEY、改 ADMIN_PASSWORD
+vim backend/.env
+
+# 安装 systemd 服务（开机自启 + 崩溃自动拉起）
+sudo cp deploy/eval-platform.service /etc/systemd/system/
+# 按实际路径/用户修改文件里的 User / WorkingDirectory / ExecStart
+sudo systemctl daemon-reload && sudo systemctl enable --now eval-platform
+
+# Nginx 反向代理（修改 nginx.conf 里的 server_name 为内网域名/IP）
+sudo cp nginx.conf /etc/nginx/sites-available/eval-platform
+sudo ln -s /etc/nginx/sites-available/eval-platform /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+之后更新版本只需：`cd /opt/eval-platform && bash deploy/deploy.sh`（自动 git pull + 重启服务）。
+
+部署完成后把 `http://<内网域名或IP>/` 发给同事，用管理后台创建的账号登录即用。
+
 ## API Key 两种方式
 
 - **环境变量**（推荐生产）：`export LLM_GW_API_KEY=xxx` 后端进程可见。
@@ -95,6 +137,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 | Method | Path | 说明 |
 |---|---|---|
+| POST | `/api/auth/login` / `/api/auth/logout` | 登录 / 登出（HttpOnly Cookie 会话） |
+| GET  | `/api/auth/me` | 当前登录用户 |
+| POST | `/api/auth/change-password` | 修改自己的密码 |
+| GET / POST | `/api/admin/users` | 用户列表 / 创建账号（仅管理员） |
+| PUT / DELETE | `/api/admin/users/{id}` | 重置密码 / 启停用 / 删除（仅管理员） |
+| GET  | `/api/admin/login-records` | 登录记录（仅管理员） |
+| GET  | `/api/admin/overview` | 全员评测数据总览（仅管理员） |
+| GET  | `/api/admin/users/{id}/data` | 某用户数据明细下钻（仅管理员） |
 | POST | `/api/datasets` | 上传 Excel/CSV |
 | GET  | `/api/datasets` / `/api/datasets/{id}` | 数据集列表 / 详情（含 10 行预览） |
 | GET  | `/api/models` | 可选模型列表 |
@@ -122,4 +172,4 @@ UI 风格遵循 ui-ux-pro-max 推荐的 **Minimal + Micro-interactions**：
 
 ## MVP 不做（已在 PRD 中声明）
 
-登录权限、流式输出、多任务并发、断点续跑、A/B 模型对比、图表统计、Docker 部署。
+流式输出、多任务并发、断点续跑、A/B 模型对比、图表统计、Docker 部署。（登录权限已于 v0.2 实现）
