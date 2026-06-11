@@ -6,7 +6,10 @@ const KEY_GW_URL = "llm_gw_url";
 const KEY_MODELS = "llm_models";
 const KEY_API_KEY = "llm_gw_api_key"; // 与原 apiKeyStore 同一个 key，平滑迁移
 
-export const DEFAULT_GW_URL = "http://llm-gw.jd.local/v1/chat/completions";
+// 默认指向本机转发代理（见 proxy/ 目录）。浏览器无法直连内网 HTTP 网关，
+// 必须经由本机 127.0.0.1 代理转发，详见 proxy/README.md。
+export const PROXY_GW_URL = "http://127.0.0.1:8787/v1/chat/completions";
+export const DEFAULT_GW_URL = PROXY_GW_URL;
 export const DEFAULT_MODELS = ["GPT-5.5-joybuilder"];
 
 export const settings = {

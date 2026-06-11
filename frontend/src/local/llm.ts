@@ -99,8 +99,9 @@ export async function callLLM(opts: {
       // 浏览器跨域/网络不通时是 TypeError: Failed to fetch，补充提示
       if (err.name === "TypeError" || err.name === "AbortError") {
         lastErr = new LLMError(
-          `网络请求失败（${err.message}）。请确认：1) 你能访问 LLM 网关（内网环境）；` +
-            `2) 网关地址配置正确；3) 网关允许跨域（CORS）调用。`
+          `网络请求失败（${err.message}）。最常见原因：本机转发小工具没启动。` +
+            `请先运行 proxy/ 目录下的转发程序，并在「设置」里把网关地址填成 ` +
+            `http://127.0.0.1:8787/v1/chat/completions（详见 proxy/README.md）。`
         );
       } else {
         lastErr = err;

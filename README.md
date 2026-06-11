@@ -16,11 +16,12 @@ GitHub Pages 部署：
 
 **<https://wscjoel.github.io/eval-platform/>**
 
-> 注意：评测功能需要浏览器能访问 LLM 网关（如京东内网网关需在内网环境打开本站），且网关需允许跨域（CORS）。网关地址和模型列表可在顶部「设置」中修改。
+> **评测功能需要先运行本机转发小工具**：浏览器出于安全限制（Mixed Content + CORS）无法直接调用内网 HTTP 网关，需要在本机跑一个极简转发程序（见 `proxy/` 目录，零依赖、不存数据）。运行后在顶部「设置」里点「填入本地代理地址」即可。详见 [`proxy/README.md`](proxy/README.md)。
 
 ## 使用说明
 
-1. 打开网站，点顶部「设置」确认 LLM 网关地址和模型列表，填入 API Key（仅存本机）
+0. （评测前必做）运行 `proxy/` 里的本机转发小工具，详见 [`proxy/README.md`](proxy/README.md)
+1. 打开网站，点顶部「设置」→「填入本地代理地址」，并填入 API Key（仅存本机）
 2. 「数据集管理」上传 .xlsx / .xls / .csv
 3. 「新建评测」选数据集 + 写提示词（支持 `{{列名}}` 占位符）+ 可选 JSON Schema → 试运行 → 全量运行
 4. 「任务记录」查看进度与结果，可筛选、单行重试、导出 Excel
@@ -58,9 +59,19 @@ eval-platform/
 │       ├── cleaningRunner.ts  清洗脚本 Web Worker 执行器
 │       ├── excel.ts           Excel/CSV 解析与导出（SheetJS）
 │       └── exports.ts         任务结果 / 批注作业导出
+├── proxy/                     本机转发小工具（让浏览器能调内网网关）
 ├── backend/                   旧版 FastAPI 后端（保留，纯前端版不再使用）
 └── deploy/publish-pages.sh    一键发布到 GitHub Pages
 ```
+
+## 为什么评测需要本机转发？
+
+公网 HTTPS 页面（GitHub Pages）的浏览器无法直接调用内网 HTTP 网关：
+
+- **Mixed Content**：HTTPS 页面禁止请求 `http://` 资源；
+- **CORS**：内网网关一般不返回跨域响应头。
+
+浏览器对 `http://localhost` / `127.0.0.1` 有 Mixed Content 豁免，所以让本机代理（`proxy/proxy.py`）做一次转发即可打通，且它只是无状态转发、不保存任何数据。
 
 ## 部署
 

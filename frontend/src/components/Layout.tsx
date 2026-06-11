@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { ApiKeyBar } from "./ApiKeyBar";
-import { DEFAULT_GW_URL, settings } from "../local/settings";
+import { DEFAULT_GW_URL, PROXY_GW_URL, settings } from "../local/settings";
 
 function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [gwUrl, setGwUrl] = useState(() => settings.gatewayUrl());
@@ -25,10 +25,24 @@ function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }
       <div className="card w-full max-w-lg p-6 space-y-4">
         <h2 className="text-lg font-semibold">LLM 网关设置</h2>
         <p className="text-xs text-ink-500">
-          所有配置与数据只保存在你自己的浏览器本地，评测请求由浏览器直连网关。
+          所有配置与数据只保存在你自己的浏览器本地。
         </p>
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[11.5px] text-amber-800 leading-relaxed">
+          浏览器无法直接调用内网 HTTP 网关（安全限制）。请先运行随仓库提供的
+          <b> 本机转发小工具</b>（见 <code className="font-mono">proxy/</code> 目录），
+          再把网关地址填成代理地址。详见 <code className="font-mono">proxy/README.md</code>。
+        </div>
         <div>
-          <label className="label">网关地址（OpenAI Chat Completions 兼容）</label>
+          <div className="flex items-center justify-between">
+            <label className="label">网关地址（OpenAI Chat Completions 兼容）</label>
+            <button
+              type="button"
+              className="text-xs text-accent hover:underline"
+              onClick={() => setGwUrl(PROXY_GW_URL)}
+            >
+              填入本地代理地址
+            </button>
+          </div>
           <input
             className="input w-full"
             value={gwUrl}
