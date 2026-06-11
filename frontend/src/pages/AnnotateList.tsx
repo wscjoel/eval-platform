@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, AnnoJob } from "../api/client";
+import { exportAnnoJobXlsx } from "../local/exports";
 import { IconDownload, IconPlus, IconSettings, IconTrash } from "../components/Icon";
 
 function fmtTime(s: string) {
@@ -104,13 +105,13 @@ export function AnnotateList() {
                 <td className="px-4 py-3 text-ink-500">{fmtTime(j.created_at)}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1">
-                    <a
+                    <button
                       className="btn-ghost px-2 py-1.5"
-                      href={`/api/anno/jobs/${j.id}/export.xlsx`}
+                      onClick={() => exportAnnoJobXlsx(j.id)}
                       title="导出 Excel"
                     >
                       <IconDownload className="w-4 h-4" />
-                    </a>
+                    </button>
                     <button
                       className="btn-ghost px-2 py-1.5 text-danger hover:bg-red-50"
                       onClick={() => {

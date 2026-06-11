@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, apiKeyStore, ResultOut, ResultsPage, TaskOut, taskApi } from "../api/client";
+import { exportTaskXlsx } from "../local/exports";
 import {
   IconArrowLeft,
   IconChart,
@@ -130,10 +131,10 @@ export function TaskDetail() {
               {task.status === "stopping" ? "停止中…" : "停止"}
             </button>
           )}
-          <a className="btn-accent" href={`/api/tasks/${task.id}/export.xlsx`}>
+          <button className="btn-accent" onClick={() => exportTaskXlsx(task.id)}>
             <IconDownload className="w-4 h-4" />
             导出 Excel
-          </a>
+          </button>
         </div>
       </div>
 

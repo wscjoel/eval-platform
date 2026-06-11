@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, TaskOut } from "../api/client";
+import { exportTaskXlsx } from "../local/exports";
 import { IconDownload, IconPlus, IconTrash } from "../components/Icon";
 import { StatusBadge } from "../components/StatusBadge";
 
@@ -96,13 +97,13 @@ export function TaskList() {
                 <td className="px-4 py-3 text-ink-500">{fmtTime(t.created_at)}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1">
-                    <a
+                    <button
                       className="btn-ghost px-2 py-1.5"
-                      href={`/api/tasks/${t.id}/export.xlsx`}
+                      onClick={() => exportTaskXlsx(t.id)}
                       title="导出 Excel"
                     >
                       <IconDownload className="w-4 h-4" />
-                    </a>
+                    </button>
                     <button
                       className="btn-ghost px-2 py-1.5 text-danger hover:bg-red-50"
                       onClick={() => {

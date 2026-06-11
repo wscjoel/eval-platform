@@ -9,6 +9,7 @@ import {
   DimensionConfig,
 } from "../api/client";
 import { DimensionConfigModal, parseOptions } from "../components/DimensionConfigModal";
+import { exportAnnoJobXlsx } from "../local/exports";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -123,10 +124,10 @@ export function AnnotateWorkspace() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a className="btn-ghost border border-ink-200" href={`/api/anno/jobs/${jobId}/export.xlsx`}>
+          <button className="btn-ghost border border-ink-200" onClick={() => exportAnnoJobXlsx(jobId)}>
             <IconDownload className="w-4 h-4" />
             导出 Excel
-          </a>
+          </button>
         </div>
       </div>
 

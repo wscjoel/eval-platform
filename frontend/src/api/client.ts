@@ -1,137 +1,14 @@
 import axios from "axios";
+import { localAdapter } from "../local/adapter";
+import { settings } from "../local/settings";
 
+// 纯前端模式：所有 /api/* 请求由 localAdapter 在浏览器内处理，
+// 数据保存在本机 IndexedDB，不经过任何服务器。
 export const api = axios.create({
   baseURL: "/api",
   timeout: 120_000,
+  adapter: localAdapter,
 });
-
-// 统一异常增强：
-// - 401（未登录/会话过期）统一跳转登录页（登录接口本身除外，避免循环）
-// - 413（Request Entity Too Large）给出明确文案，
-//   这通常由 Nginx / 网关 client_max_body_size 限制触发，而非业务逻辑。
-api.interceptors.response.use(
-  (resp) => resp,
-  (error) => {
-    const status = error?.response?.status;
-    const reqUrl: string = error?.config?.url || "";
-    if (
-      status === 401 &&
-      !reqUrl.includes("/auth/login") &&
-      window.location.pathname !== "/login"
-    ) {
-      const next = window.location.pathname + window.location.search;
-      window.location.href = `/login?next=${encodeURIComponent(next)}`;
-    }
-    if (status === 413) {
-      const friendly =
-        "请求体过大被网关拦截（HTTP 413）。请联系管理员调高反向代理的 client_max_body_size，或减小本次上传文件 / 数据量后重试。";
-      error.message = friendly;
-      if (error.response) {
-        error.response.data = { detail: friendly };
-      }
-    }
-    return Promise.reject(error);
-  }
-);
-
-// ---------------- 账号与登录 ----------------
-
-export type CurrentUser = {
-  id: number;
-  username: string;
-  display_name: string;
-  role: "admin" | "user";
-  is_active: boolean;
-  created_at: string;
-  last_login_at: string | null;
-};
-
-export type LoginRecordOut = {
-  id: number;
-  user_id: number | null;
-  username: string;
-  success: boolean;
-  ip: string;
-  user_agent: string;
-  login_at: string;
-};
-
-export type LoginRecordsPage = {
-  total: number;
-  items: LoginRecordOut[];
-};
-
-export type UserDataStats = {
-  user: CurrentUser;
-  dataset_count: number;
-  task_count: number;
-  anno_job_count: number;
-  login_count: number;
-};
-
-export const authApi = {
-  async login(username: string, password: string): Promise<CurrentUser> {
-    return (await api.post<CurrentUser>("/auth/login", { username, password })).data;
-  },
-  async logout(): Promise<void> {
-    await api.post("/auth/logout");
-  },
-  async me(): Promise<CurrentUser> {
-    return (await api.get<CurrentUser>("/auth/me")).data;
-  },
-  async changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    await api.post("/auth/change-password", {
-      old_password: oldPassword,
-      new_password: newPassword,
-    });
-  },
-};
-
-export const adminApi = {
-  async listUsers(): Promise<CurrentUser[]> {
-    return (await api.get<CurrentUser[]>("/admin/users")).data;
-  },
-  async createUser(payload: {
-    username: string;
-    password: string;
-    display_name?: string;
-    role?: "admin" | "user";
-  }): Promise<CurrentUser> {
-    return (await api.post<CurrentUser>("/admin/users", payload)).data;
-  },
-  async updateUser(
-    id: number,
-    payload: {
-      display_name?: string;
-      password?: string;
-      is_active?: boolean;
-      role?: "admin" | "user";
-    }
-  ): Promise<CurrentUser> {
-    return (await api.put<CurrentUser>(`/admin/users/${id}`, payload)).data;
-  },
-  async deleteUser(id: number): Promise<void> {
-    await api.delete(`/admin/users/${id}`);
-  },
-  async loginRecords(params: {
-    user_id?: number;
-    offset?: number;
-    limit?: number;
-  }): Promise<LoginRecordsPage> {
-    return (await api.get<LoginRecordsPage>("/admin/login-records", { params })).data;
-  },
-  async overview(): Promise<UserDataStats[]> {
-    return (await api.get<UserDataStats[]>("/admin/overview")).data;
-  },
-  async userData(id: number): Promise<{
-    user: CurrentUser;
-    datasets: DatasetOut[];
-    tasks: TaskOut[];
-    anno_jobs: AnnoJob[];
-  }> {
-    return (await api.get(`/admin/users/${id}/data`)).data;
-  },
-};
 
 export type DatasetOut = {
   id: number;
@@ -413,14 +290,11 @@ export const taskApi = {
   },
 };
 
-const API_KEY_STORAGE = "llm_gw_api_key";
-
 export const apiKeyStore = {
   get(): string {
-    return localStorage.getItem(API_KEY_STORAGE) || "";
+    return settings.apiKey();
   },
   set(v: string) {
-    if (v) localStorage.setItem(API_KEY_STORAGE, v);
-    else localStorage.removeItem(API_KEY_STORAGE);
+    settings.setApiKey(v);
   },
 };

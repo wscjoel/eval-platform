@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import CodeMirror from "@uiw/react-codemirror";
-import { python } from "@codemirror/lang-python";
+import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 import {
@@ -30,24 +30,28 @@ import {
 type CleanMethod = "script" | "knowledge";
 type InputMode = "text" | "table";
 
-const DEFAULT_SCRIPT = `# 可用变量：
-#   input_text  : str             — 上传文件的纯文本内容（或表格被序列化的字符串）
-#   input_table : pandas.DataFrame — 上传文件的表格内容（若为表格输入）
-#   pd          : pandas           — 已为你 import
-# 请把清洗结果赋值给 output 变量：
-#   - 字符串      → 文本结果
-#   - DataFrame   → 表格结果
-#   - list[dict]  → 表格结果
+const DEFAULT_SCRIPT = `// 可用变量（JavaScript，在浏览器中运行）：
+//   input_text  : string   — 上传文件的纯文本内容
+//   input_table : object[] — 上传文件的表格内容（数组，每行一个对象）
+//   mode        : "text" | "table"
+// 请把清洗结果赋值给 output 变量：
+//   - 字符串      → 文本结果
+//   - 对象数组    → 表格结果
 
-if mode == "table":
-    df = input_table.copy()
-    # 示例：去掉所有 NaN，并去重
-    df = df.fillna("").drop_duplicates()
-    output = df
-else:
-    # 示例：按行去空格并去重
-    lines = [l.strip() for l in input_text.splitlines() if l.strip()]
-    output = "\\n".join(dict.fromkeys(lines))
+if (mode === "table") {
+  // 示例：去除空白并按整行去重
+  const seen = new Set();
+  output = input_table.filter((row) => {
+    const key = JSON.stringify(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+} else {
+  // 示例：按行去空格并去重
+  const lines = input_text.split("\\n").map((l) => l.trim()).filter(Boolean);
+  output = [...new Set(lines)].join("\\n");
+}
 `;
 
 export function CleaningWorkspace() {
@@ -680,7 +684,7 @@ function EditorCard({
           <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-ink-900 text-white text-xs">
             2
           </span>
-          <span className="font-medium">编辑 Python 脚本</span>
+          <span className="font-medium">编辑 JavaScript 脚本</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -753,7 +757,7 @@ function EditorCard({
             value={code}
             height="380px"
             theme={oneDark}
-            extensions={[python()]}
+            extensions={[javascript()]}
             onChange={(v) => onCodeChange(v)}
             basicSetup={{
               lineNumbers: true,
@@ -800,10 +804,10 @@ function EditorCard({
           <div className="border-t border-ink-200 pt-3">
             <div className="label">使用说明</div>
             <ul className="space-y-1 leading-relaxed text-[11.5px] text-ink-700">
-              <li>· <code className="font-mono bg-ink-100 px-1 rounded">input_text</code> 上传文件的文本内容</li>
-              <li>· <code className="font-mono bg-ink-100 px-1 rounded">input_table</code> 上传文件的 DataFrame</li>
-              <li>· <code className="font-mono bg-ink-100 px-1 rounded">pd</code> 已预先 import pandas</li>
-              <li>· 结果赋值给 <code className="font-mono bg-ink-100 px-1 rounded">output</code>（str / DataFrame / list[dict]）</li>
+              <li>· <code className="font-mono bg-ink-100 px-1 rounded">input_text</code> 上传文件的文本内容（string）</li>
+              <li>· <code className="font-mono bg-ink-100 px-1 rounded">input_table</code> 上传文件的表格（对象数组）</li>
+              <li>· <code className="font-mono bg-ink-100 px-1 rounded">console.log</code> 输出会显示在运行日志中</li>
+              <li>· 结果赋值给 <code className="font-mono bg-ink-100 px-1 rounded">output</code>（string / 对象数组）</li>
               <li>· 最大运行 30 秒，代码 ≤ 50KB</li>
             </ul>
           </div>
@@ -811,7 +815,7 @@ function EditorCard({
       </div>
 
       <div className="px-5 py-3 border-t border-ink-200 flex items-center justify-between flex-wrap gap-2">
-        <div className="text-[11px] text-ink-500">超时 30s · 子进程隔离</div>
+        <div className="text-[11px] text-ink-500">超时 30s · Web Worker 隔离</div>
         <button
           onClick={onRun}
           disabled={disabled || running}

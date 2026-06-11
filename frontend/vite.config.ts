@@ -7,6 +7,8 @@ const STATIC_OUT = path.resolve(__dirname, "../backend/app/static");
 
 export default defineConfig({
   plugins: [react()],
+  // 相对路径资源引用：同时兼容 GitHub Pages 子路径与 FastAPI 静态托管
+  base: "./",
   build: {
     outDir: STATIC_OUT,
     emptyOutDir: true,
