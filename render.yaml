@@ -1,0 +1,27 @@
+# Render 一键部署配置（https://render.com）
+# 用法：Render Dashboard → New → Blueprint → 选择本仓库
+#
+# 注意：免费实例磁盘不持久，重新部署/重启后 SQLite 数据和上传文件会丢失。
+# 若需持久化，升级到付费实例并取消下方 disk 注释。
+
+services:
+  - type: web
+    name: eval-platform
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false # 部署时在 Dashboard 填写
+      - key: SECRET_KEY
+        generateValue: true
+      - key: LLM_GW_URL
+        sync: false # 可选：公网可达的 LLM 网关地址
+      - key: LLM_GW_API_KEY
+        sync: false # 可选：也可由使用者在前端各自填 Key
+    # disk:
+    #   name: eval-data
+    #   mountPath: /data
+    #   sizeGB: 1

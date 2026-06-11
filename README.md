@@ -77,7 +77,29 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 > 部署到平台时务必把仓库根目录中的 `backend/app/static/` 产物提交入库（或在 CI/CD 中执行上述 `npm run build`），否则平台仅托管源码会再次白屏。
 
-### 4. 内网服务器一键部署（systemd + Nginx）
+### 4. 外网 PaaS 部署（无需自己的服务器，推荐）
+
+仓库已含多阶段 `Dockerfile`（前端构建 + FastAPI 单服务），Railway / Render / Zeabur / Fly.io 等平台均可自动识别。
+
+**Railway（推荐，支持持久化卷）**
+
+1. 打开 [railway.app](https://railway.app)，用 GitHub 登录
+2. New Project → Deploy from GitHub repo → 选择 `eval-platform`，自动按 Dockerfile 构建
+3. 服务 Settings → Volumes → 新建卷，Mount Path 填 `/data`（SQLite 与上传文件的持久化目录）
+4. Variables 中设置：`ADMIN_PASSWORD`（必填，别用默认）、`SECRET_KEY`（随机长字符串）、可选 `LLM_GW_URL` / `LLM_GW_API_KEY`
+5. Settings → Networking → Generate Domain，得到公网链接 `https://xxx.up.railway.app`
+
+**Render（有免费档）**
+
+1. 打开 [render.com](https://render.com)，用 GitHub 登录
+2. New → Blueprint → 选择本仓库（已含 `render.yaml`），填写 `ADMIN_PASSWORD`
+3. 部署完成得到 `https://xxx.onrender.com`
+
+> Render 免费档磁盘不持久：重新部署/实例重启后数据库和上传文件会丢失，且闲置 15 分钟休眠（再次访问需等待约 1 分钟冷启动）。正式使用建议 Railway + 卷，或 Render 付费档挂磁盘。
+
+**关于 LLM 调用**：评测请求由部署的后端发起。若后端在公网而网关 `llm-gw.jd.local` 仅内网可达，需把 `LLM_GW_URL` 配置为公网可达的网关地址；上传数据、人工批注、数据清洗、结果查看等功能不依赖 LLM，均不受影响。
+
+### 5. 内网服务器一键部署（systemd + Nginx）
 
 服务器需预装 `python3 (>=3.9)`、`node (>=18)`、`git`。
 
