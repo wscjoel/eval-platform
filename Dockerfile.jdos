@@ -1,0 +1,32 @@
+# 行云（JDOS）Dockerfile 构建专用 — 单阶段
+#
+# 行云内网拉不到 Docker Hub 的 node/python 官方镜像，因此：
+# - 不做前端构建阶段：前端产物已提交在 backend/app/static/，直接使用
+# - 基础镜像使用行云系统基础镜像（界面选择 other-jd-centos7-python3.11-sqllite3:latest）
+#
+# 注意：如果行云要求 FROM 必须写镜像完整地址，请把下面 FROM 替换为
+# 界面上选中基础镜像后显示的完整地址（如 xxx.jd.com/base/other-jd-centos7-python3.11-sqllite3:latest）。
+#
+# 行云表单：Dockerfile 路径填 Dockerfile.jdos
+
+FROM other-jd-centos7-python3.11-sqllite3:latest
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY backend/requirements.txt /app/requirements.txt
+# 若公网 pypi 拉不动，追加京东内部源参数：
+#   -i http://mirrors.jd.com/pypi/web/simple --trusted-host mirrors.jd.com
+RUN python3 -m pip install -r /app/requirements.txt
+
+COPY backend/app /app/app
+
+# 数据目录：SQLite + 上传文件。部署时把持久化卷挂载到 /data
+ENV DATA_DIR=/data
+RUN mkdir -p /data
+
+EXPOSE 8000
+
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
